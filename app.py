@@ -24,9 +24,23 @@ if "inspect_symbol" not in st.session_state:
     st.session_state.inspect_symbol = None
 if "screener_matches" not in st.session_state:
     st.session_state.screener_matches = None
+if "alerted_states" not in st.session_state:
+    st.session_state.alerted_states = {}
 
 def clear_inspection():
     st.session_state.inspect_symbol = None
+
+# --- NTFY ALERT ENGINE ---
+def send_ntfy_alert(message, title="Momentum Alert"):
+    try:
+        req = urllib.request.Request(
+            "https://ntfy.sh/2026_USstockspicks",
+            data=message.encode("utf-8"),
+            headers={"Title": title, "Priority": "high"}
+        )
+        urllib.request.urlopen(req, timeout=5)
+    except Exception as e:
+        pass
 
 # --- CUSTOM CSS: MANUS EDITORIAL THEME ---
 st.markdown("""
@@ -126,6 +140,27 @@ h1, h2, h3 {
     margin-right: 6px;
     margin-bottom: 6px;
 }
+.scroll-news-box {
+    max-height: 480px;
+    overflow-y: auto;
+    padding-right: 6px;
+}
+.scroll-news-box::-webkit-scrollbar {
+    width: 6px;
+}
+.scroll-news-box::-webkit-scrollbar-thumb {
+    background: #d1d5db;
+    border-radius: 4px;
+}
+.ticker-news-badge {
+    background: #dcfce7;
+    color: #15803d;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-weight: 700;
+    font-size: 0.7rem;
+    margin-right: 6px;
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -173,7 +208,7 @@ GICS_SECTORS = {
 
 # --- GOOGLE NEWS RSS FETCHER ---
 @st.cache_data(ttl=600)
-def fetch_google_news_rss(query, max_items=5):
+def fetch_google_news_rss(query, max_items=12):
     encoded_query = urllib.parse.quote(query)
     url = f"https://news.google.com/rss/search?q={encoded_query}&hl=en-US&gl=US&ceid=US:en"
     req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"})
@@ -188,7 +223,6 @@ def fetch_google_news_rss(query, max_items=5):
             pub_date = item.find("pubDate").text if item.find("pubDate") is not None else ""
             source = item.find("source").text if item.find("source") is not None else "News"
             
-            # Format clean title and publisher
             clean_title = raw_title.rsplit(" - ", 1)[0] if " - " in raw_title else raw_title
             clean_date = pub_date[:16] if len(pub_date) >= 16 else pub_date
             
@@ -447,17 +481,11 @@ def fetch_macro_ribbon():
 
 
 # ==============================================================================
-# 1. PRIMARY SIDEBAR NAVIGATION (ALWAYS RENDERS FIRST)
+# 1. PRIMARY SIDEBAR NAVIGATION
 # ==============================================================================
 st.sidebar.markdown(
-    """
-    <div style="padding: 10px 0 20px 0;">
-        <span style="display: inline-block; width: 9px; height: 9px; background: #22c55e; border-radius: 50%; margin-right: 6px;"></span>
-        <span style="font-size: 0.85rem; font-weight: 600; letter-spacing: 0.05em; color: #a1a1aa;">MARKET OPEN · 15M DELAY</span>
-        <h2 style="color: #f4efe6 !important; margin: 6px 0 0 0; font-size: 1.4rem;">Ledger</h2>
-        <span style="font-size: 0.75rem; color: #c5a059; text-transform: uppercase; letter-spacing: 0.1em; font-weight: 600;">Quality Momentum</span>
-    </div>
-    """, unsafe_allow_html=True
+    """<div style="padding: 10px 0 20px 0;"><span style="display: inline-block; width: 9px; height: 9px; background: #22c55e; border-radius: 50%; margin-right: 6px;"></span><span style="font-size: 0.85rem; font-weight: 600; letter-spacing: 0.05em; color: #a1a1aa;">MARKET OPEN · 15M DELAY</span><h2 style="color: #f4efe6 !important; margin: 6px 0 0 0; font-size: 1.4rem;">Ledger</h2><span style="font-size: 0.75rem; color: #c5a059; text-transform: uppercase; letter-spacing: 0.1em; font-weight: 600;">Quality Momentum</span></div>""", 
+    unsafe_allow_html=True
 )
 
 navigation = st.sidebar.radio(
@@ -469,7 +497,7 @@ navigation = st.sidebar.radio(
 
 st.sidebar.markdown("---")
 st.sidebar.markdown(
-    """<div style="position: fixed; bottom: 20px; font-size: 0.75rem; color: #71717a;">Quality Momentum v5.0<br>Provider: Yahoo Finance / Google RSS</div>""", 
+    """<div style="position: fixed; bottom: 20px; font-size: 0.75rem; color: #71717a;">Quality Momentum v6.0<br>Provider: Yahoo / Google</div>""", 
     unsafe_allow_html=True
 )
 
@@ -488,14 +516,11 @@ if macro_data:
 
 
 # ==============================================================================
-# 3. CONTENT ROUTING: DETAIL VIEW vs. TAB VIEWS
+# 3. CONTENT ROUTING
 # ==============================================================================
 if st.session_state.inspect_symbol is not None:
-    # --------------------------------------------------------------------------
-    # ISOLATED DETAIL DOSSIER VIEW
-    # --------------------------------------------------------------------------
     sym = st.session_state.inspect_symbol
-    col_back, col_title = st.columns([1, 6])
+    col_back, col_title = st.columns([1, 8])
     with col_back:
         if st.button("⬅ Back", type="primary"):
             st.session_state.inspect_symbol = None
@@ -564,9 +589,6 @@ if st.session_state.inspect_symbol is not None:
         st.error(f"Unable to retrieve historical chart data for {sym}. Please verify the ticker.")
 
 else:
-    # --------------------------------------------------------------------------
-    # NORMAL TAB VIEWS
-    # --------------------------------------------------------------------------
     if navigation == "Dashboard":
         st.markdown("<h1>Market Cockpit</h1>", unsafe_allow_html=True)
         st.markdown("<p style='color: #52525b; margin-top: -12px;'>Find the names holding their trend. A focused read on quality, momentum, and context.</p>", unsafe_allow_html=True)
@@ -574,13 +596,24 @@ else:
         all_monitored = list(set(watchlists["Active Portfolio"] + watchlists["Opportunity Radar"]))
         stock_records = fetch_batch_market_data(all_monitored)
 
+        # TRIGGER ALERTS FOR STATE CHANGES
         if stock_records:
+            for sym_key, d_data in stock_records.items():
+                current_state = d_data["State"]
+                # If state has changed this session, check for alert
+                if st.session_state.alerted_states.get(sym_key) != current_state:
+                    if current_state == "Confirmed Breakout" and settings.get("alert_breakout", True):
+                        send_ntfy_alert(f"{sym_key} confirmed a breakout above its 20-day high with strong volume.", f"🚀 {sym_key} Breakout!")
+                    elif current_state == "Support Break" and settings.get("alert_support", True):
+                        send_ntfy_alert(f"{sym_key} has broken below its 50-day EMA support line.", f"⚠️ {sym_key} Support Break")
+                    st.session_state.alerted_states[sym_key] = current_state
+
             best_pick = max(stock_records.values(), key=lambda x: x["Score"])
-            h_col1, h_col2 = st.columns([5, 1])
+            h_col1, h_col2 = st.columns([11, 1])
             with h_col1:
                 st.markdown(
                     f"""
-                    <div style="background-color: #0f291e; border-radius: 10px; padding: 22px 28px; color: #fbf9f4;">
+                    <div style="background-color: #0f291e; border-radius: 10px; padding: 20px 24px; color: #fbf9f4;">
                         <div style="font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.12em; color: #c5a059; font-weight: 700;">
                             TODAY'S STANDOUT SETUP
                         </div>
@@ -591,21 +624,21 @@ else:
                                 <span style="color: {'#4ade80' if best_pick['Change'] >= 0 else '#f87171'}; font-weight: 600; margin-left: 6px;">
                                     {'+' if best_pick['Change'] >= 0 else ''}{best_pick['Change_Pct']:.2f}%
                                 </span>
-                                <div style="color: #cbd5e1; font-size: 0.95rem; margin-top: 6px;">{best_pick['Reason']}</div>
+                                <div style="color: #cbd5e1; font-size: 0.92rem; margin-top: 4px;">{best_pick['Reason']}</div>
                             </div>
                             <div style="text-align: right;">
-                                <div style="font-size: 2.4rem; font-weight: 700; color: #c5a059; font-family: 'Newsreader', serif;">
+                                <div style="font-size: 2.2rem; font-weight: 700; color: #c5a059; font-family: 'Newsreader', serif;">
                                     {best_pick['Score']}
                                 </div>
-                                <div style="font-size: 0.75rem; color: #94a3b8; text-transform: uppercase;">Composite Score</div>
+                                <div style="font-size: 0.70rem; color: #94a3b8; text-transform: uppercase;">Composite Score</div>
                             </div>
                         </div>
                     </div>
                     """, unsafe_allow_html=True
                 )
             with h_col2:
-                st.markdown("<div style='height: 25px;'></div>", unsafe_allow_html=True)
-                if st.button(f"🔍 Inspect {best_pick['Ticker']}", key="btn_hero_inspect"):
+                st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
+                if st.button("🔍", key="btn_hero_inspect", help=f"Inspect {best_pick['Ticker']}"):
                     st.session_state.inspect_symbol = best_pick['Ticker']
                     st.rerun()
 
@@ -613,51 +646,60 @@ else:
 
         col_left, col_right = st.columns([2, 1])
         with col_left:
-            st.subheader("Major Market Stories (Google News)")
-            market_news = fetch_google_news_rss("US stock market news", max_items=4)
-            if market_news:
-                for n in market_news:
-                    st.markdown(
-                        f"""
-                        <div style="background: white; border: 1px solid #e7e2d9; border-radius: 8px; padding: 12px 16px; margin-bottom: 10px;">
-                            <div style="display: flex; justify-content: space-between; font-size: 0.72rem; color: #71717a;">
-                                <span style="font-weight: 600;">{n['publisher']}</span>
-                                <span>{n['date']}</span>
-                            </div>
-                            <div style="font-weight: 600; font-size: 0.95rem; margin-top: 3px;">
-                                <a href="{n['link']}" target="_blank" style="color: #0f291e; text-decoration: none;">{n['title']}</a>
-                            </div>
-                        </div>
-                        """, unsafe_allow_html=True
-                    )
-            else:
-                st.info("Market headlines feed currently refreshing.")
+            tab_watch, tab_macro = st.tabs(["Watchlist Feed", "General Market"])
+            
+            with tab_watch:
+                wl_queries = [f"{s} stock" for s in all_monitored[:6]]
+                news_html = '<div class="scroll-news-box">'
+                found_any = False
+                for q in wl_queries:
+                    ticker_name = q.replace(" stock", "")
+                    articles = fetch_google_news_rss(q, max_items=2)
+                    for a in articles:
+                        found_any = True
+                        news_html += f'<div style="background: white; border: 1px solid #e7e2d9; border-radius: 8px; padding: 12px 16px; margin-bottom: 8px;"><div style="display: flex; justify-content: space-between; font-size: 0.72rem; color: #71717a;"><span style="font-weight: 600;"><span class="ticker-news-badge">[{ticker_name}]</span> {a["publisher"]}</span><span>{a["date"]}</span></div><div style="font-weight: 600; font-size: 0.92rem; margin-top: 4px;"><a href="{a["link"]}" target="_blank" style="color: #0f291e; text-decoration: none;">{a["title"]}</a></div></div>'
+                news_html += '</div>'
+                if found_any:
+                    st.markdown(news_html, unsafe_allow_html=True)
+                else:
+                    st.info("No recent specific news found for tracked assets.")
+
+            with tab_macro:
+                market_news = fetch_google_news_rss("US stock market news", max_items=12)
+                if market_news:
+                    m_news_html = '<div class="scroll-news-box">'
+                    for n in market_news:
+                        m_news_html += f'<div style="background: white; border: 1px solid #e7e2d9; border-radius: 8px; padding: 12px 16px; margin-bottom: 8px;"><div style="display: flex; justify-content: space-between; font-size: 0.72rem; color: #71717a;"><span style="font-weight: 600;">{n["publisher"]}</span><span>{n["date"]}</span></div><div style="font-weight: 600; font-size: 0.92rem; margin-top: 3px;"><a href="{n["link"]}" target="_blank" style="color: #0f291e; text-decoration: none;">{n["title"]}</a></div></div>'
+                    m_news_html += '</div>'
+                    st.markdown(m_news_html, unsafe_allow_html=True)
+                else:
+                    st.info("Market headlines feed currently refreshing.")
 
         with col_right:
             st.subheader("Radar Snapshot")
-            for s in watchlists["Opportunity Radar"][:5]:
+            for s in watchlists["Opportunity Radar"][:6]:
                 if s in stock_records:
                     r = stock_records[s]
-                    c_card, c_btn = st.columns([3, 1])
+                    c_card, c_btn = st.columns([5, 1])
                     with c_card:
                         st.markdown(
                             f"""
-                            <div style="background: white; border: 1px solid #e7e2d9; border-radius: 8px; padding: 8px 12px; margin-bottom: 8px; display: flex; justify-content: space-between;">
+                            <div style="background: white; border: 1px solid #e7e2d9; border-radius: 8px; padding: 8px 12px; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center;">
                                 <div>
                                     <span style="font-weight: 700; color: #0f291e;">{r['Ticker']}</span>
-                                    <div style="font-size: 0.75rem; color: #71717a;">Score {r['Score']}</div>
+                                    <span style="font-size: 0.75rem; color: #71717a; margin-left: 6px;">Score {r['Score']}</span>
                                 </div>
                                 <div style="text-align: right;">
-                                    <div style="font-weight: 600;">${r['Price']:.2f}</div>
-                                    <div style="font-size: 0.78rem; color: {'#15803d' if r['Change']>=0 else '#b91c1c'};">
+                                    <span style="font-weight: 600; font-size: 0.9rem;">${r['Price']:.2f}</span>
+                                    <span style="font-size: 0.78rem; color: {'#15803d' if r['Change']>=0 else '#b91c1c'}; margin-left: 4px;">
                                         {'+' if r['Change']>=0 else ''}{r['Change_Pct']:.2f}%
-                                    </div>
+                                    </span>
                                 </div>
                             </div>
                             """, unsafe_allow_html=True
                         )
                     with c_btn:
-                        if st.button("Inspect", key=f"insp_dash_{s}"):
+                        if st.button("🔍", key=f"insp_dash_{s}", help=f"Inspect {s}"):
                             st.session_state.inspect_symbol = s
                             st.rerun()
 
@@ -684,7 +726,7 @@ else:
                     selected_sectors.append(sec)
 
         with f_col2:
-            st.markdown("**2. Technical Signals (11 Filters)**")
+            st.markdown("**2. Technical Signals (13 Filters)**")
             s1 = st.checkbox("RSI Rising Above 60 (Momentum)", value=False)
             s2 = st.checkbox("MACD Line Above Zero", value=False)
             s3 = st.checkbox("MACD Bullish Crossover", value=False)
@@ -754,7 +796,7 @@ else:
             matches = st.session_state.screener_matches
             st.markdown(f"### Results: {len(matches)} Matches Found")
             for m in matches:
-                c1, c2, c3, c4 = st.columns([3, 2, 2, 1.5])
+                c1, c2, c3, c4 = st.columns([3, 2, 2, 1.2])
                 with c1:
                     st.markdown(
                         f"""
@@ -769,14 +811,17 @@ else:
                 with c3:
                     st.plotly_chart(render_sparkline(m["Sparkline"], m["Change"] >= 0), use_container_width=False)
                 with c4:
-                    if st.button("Inspect Chart", key=f"insp_sc_{m['Ticker']}"):
-                        st.session_state.inspect_symbol = m['Ticker']
-                        st.rerun()
-                    if st.button("+ Add Radar", key=f"add_sc_{m['Ticker']}"):
-                        if m["Ticker"] not in watchlists["Opportunity Radar"]:
-                            watchlists["Opportunity Radar"].append(m["Ticker"])
-                            save_json(DATA_FILE, watchlists)
-                            st.success("Added!")
+                    col_insp, col_add = st.columns(2)
+                    with col_insp:
+                        if st.button("🔍", key=f"insp_sc_{m['Ticker']}", help=f"Inspect {m['Ticker']}"):
+                            st.session_state.inspect_symbol = m['Ticker']
+                            st.rerun()
+                    with col_add:
+                        if st.button("➕", key=f"add_sc_{m['Ticker']}", help="Add to Radar"):
+                            if m["Ticker"] not in watchlists["Opportunity Radar"]:
+                                watchlists["Opportunity Radar"].append(m["Ticker"])
+                                save_json(DATA_FILE, watchlists)
+                                st.success("Added")
 
     elif navigation == "Watchlist":
         st.markdown("<h1>Watchlist</h1>", unsafe_allow_html=True)
@@ -815,39 +860,44 @@ else:
             if sym in data_dict:
                 d = data_dict[sym]
                 with target_c:
-                    st.markdown(
-                        f"""
-                        <div class="stock-card">
-                            <div style="display: flex; justify-content: space-between; align-items: flex-start;">
-                                <div>
-                                    <span style="font-size: 1.25rem; font-weight: 700; color: #0f291e;">{d['Ticker']}</span>
-                                    <span class="badge {d['Badge']}" style="margin-left: 8px;">{d['State']}</span>
-                                    <div style="font-size: 1.35rem; font-weight: 700; margin-top: 4px;">
-                                        ${d['Price']:.2f}
-                                        <span style="font-size: 0.9rem; color: {'#15803d' if d['Change']>=0 else '#b91c1c'}; font-weight: 600;">
-                                            {'+' if d['Change']>=0 else ''}{d['Change_Pct']:.2f}%
-                                        </span>
+                    c_info, c_action = st.columns([8, 1])
+                    with c_info:
+                        st.markdown(
+                            f"""
+                            <div class="stock-card" style="margin-bottom: 0;">
+                                <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+                                    <div>
+                                        <span style="font-size: 1.25rem; font-weight: 700; color: #0f291e;">{d['Ticker']}</span>
+                                        <span class="badge {d['Badge']}" style="margin-left: 8px;">{d['State']}</span>
+                                        <div style="font-size: 1.35rem; font-weight: 700; margin-top: 4px;">
+                                            ${d['Price']:.2f}
+                                            <span style="font-size: 0.9rem; color: {'#15803d' if d['Change']>=0 else '#b91c1c'}; font-weight: 600;">
+                                                {'+' if d['Change']>=0 else ''}{d['Change_Pct']:.2f}%
+                                            </span>
+                                        </div>
+                                    </div>
+                                    <div style="text-align: right;">
+                                        <div style="font-size: 1.6rem; font-weight: 700; color: #c5a059; font-family: 'Newsreader', serif;">{d['Score']}</div>
+                                        <div style="font-size: 0.7rem; color: #71717a; text-transform: uppercase;">Composite Score</div>
                                     </div>
                                 </div>
-                                <div style="text-align: right;">
-                                    <div style="font-size: 1.6rem; font-weight: 700; color: #c5a059; font-family: 'Newsreader', serif;">{d['Score']}</div>
-                                    <div style="font-size: 0.7rem; color: #71717a; text-transform: uppercase;">Composite Score</div>
+                                <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 10px; font-size: 0.8rem; color: #52525b; border-top: 1px solid #f1ece4; padding-top: 8px;">
+                                    <div>RSI: <b>{d['RSI']:.1f}</b></div>
+                                    <div>RVOL: <b>{d['RVOL']:.1f}x</b></div>
+                                    <div>EMA 50: <b>${d['History']['EMA50'].iloc[-1]:.2f}</b></div>
+                                </div>
+                                <div style="font-size: 0.82rem; color: #475569; margin-top: 8px; font-style: italic;">
+                                    "{d['Reason']}"
                                 </div>
                             </div>
-                            <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 10px; font-size: 0.8rem; color: #52525b; border-top: 1px solid #f1ece4; padding-top: 8px;">
-                                <div>RSI: <b>{d['RSI']:.1f}</b></div>
-                                <div>RVOL: <b>{d['RVOL']:.1f}x</b></div>
-                                <div>EMA 50: <b>${d['History']['EMA50'].iloc[-1]:.2f}</b></div>
-                            </div>
-                            <div style="font-size: 0.82rem; color: #475569; margin-top: 8px; font-style: italic;">
-                                "{d['Reason']}"
-                            </div>
-                        </div>
-                        """, unsafe_allow_html=True
-                    )
-                    if st.button(f"🔍 Inspect {sym} Detail Chart", key=f"insp_wl_{sym}"):
-                        st.session_state.inspect_symbol = sym
-                        st.rerun()
+                            """, unsafe_allow_html=True
+                        )
+                    with c_action:
+                        st.markdown("<div style='height: 18px;'></div>", unsafe_allow_html=True)
+                        if st.button("🔍", key=f"insp_wl_{sym}", help=f"Inspect {sym}"):
+                            st.session_state.inspect_symbol = sym
+                            st.rerun()
+                    st.markdown("<div style='margin-bottom: 12px;'></div>", unsafe_allow_html=True)
 
     elif navigation == "Precious Metals":
         st.markdown("<h1>Precious Metals & Commodities</h1>", unsafe_allow_html=True)
@@ -867,28 +917,33 @@ else:
             if sym in metals_data:
                 m = metals_data[sym]
                 with col:
-                    st.markdown(
-                        f"""
-                        <div class="stock-card">
-                            <div style="font-size: 0.75rem; color: #71717a; text-transform: uppercase; font-weight: 600;">{title}</div>
-                            <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 4px;">
-                                <div style="font-size: 1.5rem; font-weight: 700; color: #0f291e;">
-                                    ${m['Price']:,.2f}
-                                    <span style="font-size: 0.95rem; color: {'#15803d' if m['Change']>=0 else '#b91c1c'}; font-weight: 600;">
-                                        {'+' if m['Change']>=0 else ''}{m['Change_Pct']:.2f}%
-                                    </span>
+                    pm_info, pm_btn = st.columns([8, 1])
+                    with pm_info:
+                        st.markdown(
+                            f"""
+                            <div class="stock-card" style="margin-bottom: 0;">
+                                <div style="font-size: 0.75rem; color: #71717a; text-transform: uppercase; font-weight: 600;">{title}</div>
+                                <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 4px;">
+                                    <div style="font-size: 1.5rem; font-weight: 700; color: #0f291e;">
+                                        ${m['Price']:,.2f}
+                                        <span style="font-size: 0.95rem; color: {'#15803d' if m['Change']>=0 else '#b91c1c'}; font-weight: 600;">
+                                            {'+' if m['Change']>=0 else ''}{m['Change_Pct']:.2f}%
+                                        </span>
+                                    </div>
+                                    <span class="badge {m['Badge']}">{m['State']}</span>
                                 </div>
-                                <span class="badge {m['Badge']}">{m['State']}</span>
+                                <div style="margin-top: 10px; font-size: 0.82rem; color: #52525b;">
+                                    RSI: <b>{m['RSI']:.1f}</b> · EMA 50: <b>${m['History']['EMA50'].iloc[-1]:,.2f}</b>
+                                </div>
                             </div>
-                            <div style="margin-top: 10px; font-size: 0.82rem; color: #52525b;">
-                                RSI: <b>{m['RSI']:.1f}</b> · EMA 50: <b>${m['History']['EMA50'].iloc[-1]:,.2f}</b>
-                            </div>
-                        </div>
-                        """, unsafe_allow_html=True
-                    )
-                    if st.button(f"Inspect {title}", key=f"btn_metal_{sym}"):
-                        st.session_state.inspect_symbol = sym
-                        st.rerun()
+                            """, unsafe_allow_html=True
+                        )
+                    with pm_btn:
+                        st.markdown("<div style='height: 18px;'></div>", unsafe_allow_html=True)
+                        if st.button("🔍", key=f"btn_metal_{sym}", help=f"Inspect {title}"):
+                            st.session_state.inspect_symbol = sym
+                            st.rerun()
+                    st.markdown("<div style='margin-bottom: 12px;'></div>", unsafe_allow_html=True)
 
     elif navigation == "News & Earnings":
         st.markdown("<h1>News & Catalyst Monitor</h1>", unsafe_allow_html=True)
@@ -900,27 +955,18 @@ else:
             st.subheader("Watchlist News Feed (Google RSS)")
             tracked_symbols = watchlists["Active Portfolio"] + watchlists["Opportunity Radar"]
             
-            # Combine queries into targeted groups
-            queries = [f"{s} stock" for s in tracked_symbols[:6]]
+            queries = [f"{s} stock" for s in tracked_symbols[:8]]
             found_any = False
+            news_html = '<div class="scroll-news-box">'
             for q in queries:
                 articles = fetch_google_news_rss(q, max_items=2)
                 for a in articles:
                     found_any = True
-                    st.markdown(
-                        f"""
-                        <div style="background: white; border: 1px solid #e7e2d9; border-radius: 8px; padding: 12px 16px; margin-bottom: 10px;">
-                            <div style="display: flex; justify-content: space-between; font-size: 0.72rem; color: #71717a;">
-                                <span style="font-weight: 700; color: #0f291e;">{q.replace(' stock', '')}</span>
-                                <span>{a['publisher']} · {a['date']}</span>
-                            </div>
-                            <div style="font-weight: 600; font-size: 0.95rem; margin-top: 4px;">
-                                <a href="{a['link']}" target="_blank" style="color: #0f291e; text-decoration: none;">{a['title']}</a>
-                            </div>
-                        </div>
-                        """, unsafe_allow_html=True
-                    )
-            if not found_any:
+                    news_html += f'<div style="background: white; border: 1px solid #e7e2d9; border-radius: 8px; padding: 12px 16px; margin-bottom: 8px;"><div style="display: flex; justify-content: space-between; font-size: 0.72rem; color: #71717a;"><span style="font-weight: 700; color: #0f291e;">{q.replace(" stock", "")}</span><span>{a["publisher"]} · {a["date"]}</span></div><div style="font-weight: 600; font-size: 0.92rem; margin-top: 4px;"><a href="{a["link"]}" target="_blank" style="color: #0f291e; text-decoration: none;">{a["title"]}</a></div></div>'
+            news_html += '</div>'
+            if found_any:
+                st.markdown(news_html, unsafe_allow_html=True)
+            else:
                 st.info("Watchlist news feed refreshing.")
 
         with n_col2:
@@ -947,6 +993,16 @@ else:
         s_col1, s_col2 = st.columns(2)
 
         with s_col1:
+            st.subheader("Push Notifications")
+            if st.button("🔔 Test iPad Ping (ntfy)", type="primary"):
+                send_ntfy_alert("This is a test alert from your Quality Momentum Dashboard!", "Test Ping")
+                st.success("Test ping sent to your iPad! Make sure the ntfy app is listening to '2026_USstockspicks'.")
+            
+            st.markdown("<br>", unsafe_allow_html=True)
+            st.checkbox("Alert on Confirmed Breakouts", value=settings["alert_breakout"])
+            st.checkbox("Alert on EMA 50 Support Breaks", value=settings["alert_support"])
+
+            st.markdown("---")
             st.subheader("Score Weighting Defaults")
             w_f = st.slider("Fundamentals Weight", 0, 100, settings["w_fund"])
             w_t = st.slider("Technical Trend Weight", 0, 100, settings["w_tech"])
@@ -958,13 +1014,6 @@ else:
                 settings["w_mom"] = w_m
                 save_json(SETTINGS_FILE, settings)
                 st.success("Weights saved.")
-
-            st.markdown("---")
-            st.subheader("Email Digest Settings")
-            st.text_input("Destination Email", value=settings["email"])
-            st.checkbox("Alert on Confirmed Breakouts", value=settings["alert_breakout"])
-            st.checkbox("Alert on EMA 50 Support Breaks", value=settings["alert_support"])
-            st.checkbox("Alert on Upcoming Earnings", value=settings["alert_earnings"])
 
         with s_col2:
             st.subheader("Export Strategy Review CSV")
