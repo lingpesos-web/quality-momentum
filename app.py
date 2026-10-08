@@ -9,7 +9,8 @@ import os
 import urllib.request
 import urllib.parse
 import xml.etree.ElementTree as ET
-from datetime import datetime
+import email.utils
+from datetime import datetime, timezone
 
 # --- PAGE SETUP ---
 st.set_page_config(
@@ -24,8 +25,6 @@ if "inspect_symbol" not in st.session_state:
     st.session_state.inspect_symbol = None
 if "screener_matches" not in st.session_state:
     st.session_state.screener_matches = None
-if "alerted_states" not in st.session_state:
-    st.session_state.alerted_states = {}
 
 def clear_inspection():
     st.session_state.inspect_symbol = None
@@ -39,7 +38,7 @@ def send_ntfy_alert(message, title="Momentum Alert"):
             headers={"Title": title, "Priority": "high"}
         )
         urllib.request.urlopen(req, timeout=5)
-    except Exception as e:
+    except Exception:
         pass
 
 # --- CUSTOM CSS: MANUS EDITORIAL THEME ---
@@ -206,7 +205,16 @@ GICS_SECTORS = {
     "Real Estate": ["PLD", "AMT", "EQIX", "PSA", "O"]
 }
 
-# --- GOOGLE NEWS RSS FETCHER ---
+# --- CHRONOLOGICAL GOOGLE NEWS RSS FETCHER ---
+def parse_pub_date(date_str):
+    try:
+        dt = email.utils.parsedate_to_datetime(date_str)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt
+    except Exception:
+        return datetime.min.replace(tzinfo=timezone.utc)
+
 @st.cache_data(ttl=600)
 def fetch_google_news_rss(query, max_items=12):
     encoded_query = urllib.parse.quote(query)
@@ -217,26 +225,43 @@ def fetch_google_news_rss(query, max_items=12):
         with urllib.request.urlopen(req, timeout=6) as response:
             xml_data = response.read()
         root = ET.fromstring(xml_data)
-        for item in root.findall(".//item")[:max_items]:
+        for item in root.findall(".//item"):
             raw_title = item.find("title").text if item.find("title") is not None else "Financial Update"
             link = item.find("link").text if item.find("link") is not None else "#"
-            pub_date = item.find("pubDate").text if item.find("pubDate") is not None else ""
+            pub_date_raw = item.find("pubDate").text if item.find("pubDate") is not None else ""
             source = item.find("source").text if item.find("source") is not None else "News"
             
             clean_title = raw_title.rsplit(" - ", 1)[0] if " - " in raw_title else raw_title
-            clean_date = pub_date[:16] if len(pub_date) >= 16 else pub_date
+            dt_obj = parse_pub_date(pub_date_raw)
+            formatted_date = dt_obj.strftime("%b %d, %Y · %H:%M") if dt_obj.year > 1900 else pub_date_raw[:16]
             
             articles.append({
                 "title": clean_title,
                 "link": link,
                 "publisher": source,
-                "date": clean_date
+                "date": formatted_date,
+                "timestamp": dt_obj.timestamp()
             })
+        articles = sorted(articles, key=lambda x: x["timestamp"], reverse=True)[:max_items]
     except Exception:
         pass
     return articles
 
-# --- DATA ENGINE 1: BATCH INGESTION (MULTI-TICKER SCREENER & WATCHLIST) ---
+@st.cache_data(ttl=600)
+def fetch_watchlist_news_pool(tickers, max_items=14):
+    pool = []
+    seen_links = set()
+    for sym in tickers[:8]:
+        items = fetch_google_news_rss(f"{sym} stock", max_items=3)
+        for it in items:
+            if it["link"] not in seen_links:
+                seen_links.add(it["link"])
+                it["ticker"] = sym
+                pool.append(it)
+    pool = sorted(pool, key=lambda x: x["timestamp"], reverse=True)
+    return pool[:max_items]
+
+# --- DATA ENGINE 1: BATCH INGESTION ---
 @st.cache_data(ttl=900)
 def fetch_batch_market_data(tickers):
     if not tickers: return {}
@@ -358,7 +383,7 @@ def fetch_batch_market_data(tickers):
         except Exception: continue
     return results
 
-# --- DATA ENGINE 2: ISOLATED SINGLE-TICKER ENGINE (FOR INSPECT VIEW) ---
+# --- DATA ENGINE 2: ISOLATED SINGLE-TICKER ENGINE ---
 @st.cache_data(ttl=300)
 def fetch_single_ticker_data(sym):
     try:
@@ -430,19 +455,50 @@ def fetch_single_ticker_data(sym):
     except Exception:
         return None
 
-@st.cache_data(ttl=3600)
+# --- RESILIENT FUNDAMENTALS WITH FAST_INFO FALLBACK & 24H CACHE ---
+@st.cache_data(ttl=86400)
 def fetch_ticker_fundamentals(ticker_symbol):
+    data = {
+        "Market Cap": "N/A", "Trailing P/E": "N/A", "Forward P/E": "N/A",
+        "EPS (TTM)": "N/A", "Target Price": "N/A", "52W High": "N/A",
+        "52W Low": "N/A", "Debt/Equity": "N/A",
+        "Business Summary": "No corporate overview provided."
+    }
     try:
         t = yf.Ticker(ticker_symbol)
-        info = t.info
-        return {
-            "Market Cap": info.get("marketCap", "N/A"), "Trailing P/E": info.get("trailingPE", "N/A"),
-            "Forward P/E": info.get("forwardPE", "N/A"), "EPS (TTM)": info.get("trailingEps", "N/A"),
-            "Target Price": info.get("targetMeanPrice", "N/A"), "52W High": info.get("fiftyTwoWeekHigh", "N/A"),
-            "52W Low": info.get("fiftyTwoWeekLow", "N/A"), "Debt/Equity": info.get("debtToEquity", "N/A"),
-            "Business Summary": info.get("longBusinessSummary", "No corporate overview provided.")
-        }
-    except Exception: return {}
+        info = {}
+        try:
+            info = t.info or {}
+        except Exception:
+            info = {}
+
+        fast = getattr(t, "fast_info", None)
+
+        mcap = info.get("marketCap")
+        if not mcap and fast:
+            mcap = getattr(fast, "market_cap", None)
+        data["Market Cap"] = mcap if mcap else "N/A"
+
+        data["Trailing P/E"] = info.get("trailingPE") or info.get("trailingPe") or "N/A"
+        data["Forward P/E"] = info.get("forwardPE") or info.get("forwardPe") or "N/A"
+        data["EPS (TTM)"] = info.get("trailingEps") or "N/A"
+        data["Target Price"] = info.get("targetMeanPrice") or "N/A"
+
+        hi = info.get("fiftyTwoWeekHigh")
+        if not hi and fast:
+            hi = getattr(fast, "year_high", None)
+        data["52W High"] = hi if hi else "N/A"
+
+        lo = info.get("fiftyTwoWeekLow")
+        if not lo and fast:
+            lo = getattr(fast, "year_low", None)
+        data["52W Low"] = lo if lo else "N/A"
+
+        data["Debt/Equity"] = info.get("debtToEquity", "N/A")
+        data["Business Summary"] = info.get("longBusinessSummary", "No corporate overview provided.")
+    except Exception:
+        pass
+    return data
 
 def render_sparkline(prices, is_positive):
     color = "#15803d" if is_positive else "#b91c1c"
@@ -497,7 +553,7 @@ navigation = st.sidebar.radio(
 
 st.sidebar.markdown("---")
 st.sidebar.markdown(
-    """<div style="position: fixed; bottom: 20px; font-size: 0.75rem; color: #71717a;">Quality Momentum v6.0<br>Provider: Yahoo / Google</div>""", 
+    """<div style="position: fixed; bottom: 20px; font-size: 0.75rem; color: #71717a;">Quality Momentum v6.1<br>Provider: Yahoo / Google</div>""", 
     unsafe_allow_html=True
 )
 
@@ -536,13 +592,18 @@ if st.session_state.inspect_symbol is not None:
         df_hist = d["History"]
 
         f1, f2, f3, f4, f5, f6 = st.columns(6)
-        mcap = f"${funds.get('Market Cap', 0)/1e9:.1f}B" if isinstance(funds.get('Market Cap'), (int, float)) else "N/A"
+        raw_mcap = funds.get('Market Cap')
+        mcap_text = f"${raw_mcap/1e9:.1f}B" if isinstance(raw_mcap, (int, float)) and raw_mcap > 0 else "N/A"
+        
         f1.metric("Price", f"${d['Price']:.2f}", f"{'+' if d['Change']>=0 else ''}{d['Change_Pct']:.2f}%")
-        f2.metric("Market Cap", mcap)
+        f2.metric("Market Cap", mcap_text)
         f3.metric("Trailing P/E", f"{funds.get('Trailing P/E', 'N/A')}")
         f4.metric("EPS (TTM)", f"${funds.get('EPS (TTM)', 'N/A')}")
         f5.metric("Analyst Target", f"${funds.get('Target Price', 'N/A')}")
-        f6.metric("52W Range", f"${funds.get('52W Low', 0):.0f} - ${funds.get('52W High', 0):.0f}" if isinstance(funds.get('52W Low'), (int, float)) else "N/A")
+        
+        raw_52l, raw_52h = funds.get('52W Low'), funds.get('52W High')
+        range_52 = f"${raw_52l:.0f} - ${raw_52h:.0f}" if isinstance(raw_52l, (int, float)) and isinstance(raw_52h, (int, float)) else "N/A"
+        f6.metric("52W Range", range_52)
 
         st.markdown("---")
 
@@ -596,18 +657,7 @@ else:
         all_monitored = list(set(watchlists["Active Portfolio"] + watchlists["Opportunity Radar"]))
         stock_records = fetch_batch_market_data(all_monitored)
 
-        # TRIGGER ALERTS FOR STATE CHANGES
         if stock_records:
-            for sym_key, d_data in stock_records.items():
-                current_state = d_data["State"]
-                # If state has changed this session, check for alert
-                if st.session_state.alerted_states.get(sym_key) != current_state:
-                    if current_state == "Confirmed Breakout" and settings.get("alert_breakout", True):
-                        send_ntfy_alert(f"{sym_key} confirmed a breakout above its 20-day high with strong volume.", f"🚀 {sym_key} Breakout!")
-                    elif current_state == "Support Break" and settings.get("alert_support", True):
-                        send_ntfy_alert(f"{sym_key} has broken below its 50-day EMA support line.", f"⚠️ {sym_key} Support Break")
-                    st.session_state.alerted_states[sym_key] = current_state
-
             best_pick = max(stock_records.values(), key=lambda x: x["Score"])
             h_col1, h_col2 = st.columns([11, 1])
             with h_col1:
@@ -649,17 +699,13 @@ else:
             tab_watch, tab_macro = st.tabs(["Watchlist Feed", "General Market"])
             
             with tab_watch:
-                wl_queries = [f"{s} stock" for s in all_monitored[:6]]
-                news_html = '<div class="scroll-news-box">'
-                found_any = False
-                for q in wl_queries:
-                    ticker_name = q.replace(" stock", "")
-                    articles = fetch_google_news_rss(q, max_items=2)
-                    for a in articles:
-                        found_any = True
+                wl_news = fetch_watchlist_news_pool(all_monitored, max_items=12)
+                if wl_news:
+                    news_html = '<div class="scroll-news-box">'
+                    for a in wl_news:
+                        ticker_name = a.get("ticker", "ALERT")
                         news_html += f'<div style="background: white; border: 1px solid #e7e2d9; border-radius: 8px; padding: 12px 16px; margin-bottom: 8px;"><div style="display: flex; justify-content: space-between; font-size: 0.72rem; color: #71717a;"><span style="font-weight: 600;"><span class="ticker-news-badge">[{ticker_name}]</span> {a["publisher"]}</span><span>{a["date"]}</span></div><div style="font-weight: 600; font-size: 0.92rem; margin-top: 4px;"><a href="{a["link"]}" target="_blank" style="color: #0f291e; text-decoration: none;">{a["title"]}</a></div></div>'
-                news_html += '</div>'
-                if found_any:
+                    news_html += '</div>'
                     st.markdown(news_html, unsafe_allow_html=True)
                 else:
                     st.info("No recent specific news found for tracked assets.")
@@ -830,7 +876,7 @@ else:
         folder = st.radio("Folder View", ["Opportunity Radar", "Active Portfolio"], horizontal=True)
         symbols = watchlists[folder]
 
-        col_add, col_space = st.columns([2, 3])
+        col_add, col_sort = st.columns([3, 2])
         with col_add:
             c_in, c_btn = st.columns([3, 1])
             new_sym = c_in.text_input("Add symbol to folder", placeholder="e.g. AVGO", label_visibility="collapsed").upper().strip()
@@ -839,6 +885,13 @@ else:
                     watchlists[folder].append(new_sym)
                     save_json(DATA_FILE, watchlists)
                     st.rerun()
+
+        with col_sort:
+            sort_by = st.selectbox(
+                "Sort By",
+                ["Saved Order", "Composite Score (High → Low)", "Signal State", "Day % Change (High → Low)", "Alphabetical (A → Z)"],
+                index=0
+            )
 
         pills_html = "".join([f"<span class='pill'>{s}</span>" for s in symbols])
         st.markdown(f"<div style='margin-bottom: 16px;'>{pills_html}</div>", unsafe_allow_html=True)
@@ -853,9 +906,22 @@ else:
         st.markdown("---")
 
         data_dict = fetch_batch_market_data(symbols)
+
+        # APPLY SORTING
+        display_symbols = list(symbols)
+        if sort_by == "Composite Score (High → Low)":
+            display_symbols = sorted(display_symbols, key=lambda s: data_dict.get(s, {}).get("Score", 0), reverse=True)
+        elif sort_by == "Signal State":
+            state_priority = {"Confirmed Breakout": 0, "Active Trend": 1, "Entry Candidate": 2, "Support Break": 3}
+            display_symbols = sorted(display_symbols, key=lambda s: state_priority.get(data_dict.get(s, {}).get("State", ""), 4))
+        elif sort_by == "Day % Change (High → Low)":
+            display_symbols = sorted(display_symbols, key=lambda s: data_dict.get(s, {}).get("Change_Pct", -999), reverse=True)
+        elif sort_by == "Alphabetical (A → Z)":
+            display_symbols = sorted(display_symbols)
+
         left_c, right_c = st.columns(2)
 
-        for idx, sym in enumerate(symbols):
+        for idx, sym in enumerate(display_symbols):
             target_c = left_c if idx % 2 == 0 else right_c
             if sym in data_dict:
                 d = data_dict[sym]
@@ -947,24 +1013,21 @@ else:
 
     elif navigation == "News & Earnings":
         st.markdown("<h1>News & Catalyst Monitor</h1>", unsafe_allow_html=True)
-        st.markdown("<p style='color: #52525b; margin-top: -12px;'>Automated Google News RSS stream and earnings calendar for your pinned positions.</p>", unsafe_allow_html=True)
+        st.markdown("<p style='color: #52525b; margin-top: -12px;'>Automated Google News RSS stream and chronologically organized earnings announcements.</p>", unsafe_allow_html=True)
 
         n_col1, n_col2 = st.columns([2, 1])
 
+        tracked_symbols = watchlists["Active Portfolio"] + watchlists["Opportunity Radar"]
+
         with n_col1:
             st.subheader("Watchlist News Feed (Google RSS)")
-            tracked_symbols = watchlists["Active Portfolio"] + watchlists["Opportunity Radar"]
-            
-            queries = [f"{s} stock" for s in tracked_symbols[:8]]
-            found_any = False
-            news_html = '<div class="scroll-news-box">'
-            for q in queries:
-                articles = fetch_google_news_rss(q, max_items=2)
-                for a in articles:
-                    found_any = True
-                    news_html += f'<div style="background: white; border: 1px solid #e7e2d9; border-radius: 8px; padding: 12px 16px; margin-bottom: 8px;"><div style="display: flex; justify-content: space-between; font-size: 0.72rem; color: #71717a;"><span style="font-weight: 700; color: #0f291e;">{q.replace(" stock", "")}</span><span>{a["publisher"]} · {a["date"]}</span></div><div style="font-weight: 600; font-size: 0.92rem; margin-top: 4px;"><a href="{a["link"]}" target="_blank" style="color: #0f291e; text-decoration: none;">{a["title"]}</a></div></div>'
-            news_html += '</div>'
-            if found_any:
+            pool_articles = fetch_watchlist_news_pool(tracked_symbols, max_items=16)
+            if pool_articles:
+                news_html = '<div class="scroll-news-box">'
+                for a in pool_articles:
+                    ticker_name = a.get("ticker", "ALERT")
+                    news_html += f'<div style="background: white; border: 1px solid #e7e2d9; border-radius: 8px; padding: 12px 16px; margin-bottom: 8px;"><div style="display: flex; justify-content: space-between; font-size: 0.72rem; color: #71717a;"><span style="font-weight: 700; color: #0f291e;"><span class="ticker-news-badge">[{ticker_name}]</span> {a["publisher"]}</span><span>{a["date"]}</span></div><div style="font-weight: 600; font-size: 0.92rem; margin-top: 4px;"><a href="{a["link"]}" target="_blank" style="color: #0f291e; text-decoration: none;">{a["title"]}</a></div></div>'
+                news_html += '</div>'
                 st.markdown(news_html, unsafe_allow_html=True)
             else:
                 st.info("Watchlist news feed refreshing.")
@@ -972,19 +1035,33 @@ else:
         with n_col2:
             st.subheader("Upcoming Earnings Calendar")
             earnings_rows = []
+            now_dt = datetime.now()
             for s in tracked_symbols:
                 try:
                     cal = yf.Ticker(s).calendar
+                    raw_date = None
                     if isinstance(cal, dict) and "Earnings Date" in cal:
                         dates = cal["Earnings Date"]
-                        dt_str = str(dates[0]) if isinstance(dates, list) and dates else str(dates)
-                        earnings_rows.append({"Ticker": s, "Earnings Date": dt_str})
+                        raw_date = dates[0] if isinstance(dates, list) and dates else dates
+                    elif isinstance(cal, pd.DataFrame) and "Earnings Date" in cal.index:
+                        raw_date = cal.loc["Earnings Date"].iloc[0]
+                    
+                    if raw_date is not None:
+                        dt_parsed = pd.to_datetime(raw_date)
+                        if dt_parsed.to_pydatetime().replace(tzinfo=None) >= now_dt.replace(hour=0, minute=0, second=0):
+                            earnings_rows.append({
+                                "Ticker": s,
+                                "Earnings Date": dt_parsed.strftime("%Y-%m-%d"),
+                                "_sort": dt_parsed
+                            })
                 except Exception: continue
 
             if earnings_rows:
-                st.table(pd.DataFrame(earnings_rows))
+                earnings_rows = sorted(earnings_rows, key=lambda x: x["_sort"])
+                clean_df = pd.DataFrame([{"Ticker": r["Ticker"], "Earnings Date": r["Earnings Date"]} for r in earnings_rows])
+                st.table(clean_df)
             else:
-                st.info("No immediate earnings announcements confirmed in the next 14 days.")
+                st.info("No confirmed upcoming earnings within your monitored universe.")
 
     elif navigation == "Settings":
         st.markdown("<h1>Settings & Strategy Calibration</h1>", unsafe_allow_html=True)
