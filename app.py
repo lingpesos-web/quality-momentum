@@ -76,10 +76,10 @@ def send_ntfy_alert(message, title="Daily Portfolio Briefing"):
     except Exception as e:
         return False, f"ntfy error: {str(e)}"
 
-# --- CUSTOM CSS: MANUS EDITORIAL THEME + ULTRA-COMPACT 2-COLUMN LIVE BOARD ---
+# --- CUSTOM CSS: MANUS EDITORIAL THEME + LARGE-FONT 2-COLUMN LIVE BOARD ---
 st.markdown("""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,600;1,6..72,400&family=Inter:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,600;1,6..72,400&family=Inter:wght@400;500;600;700;800&display=swap');
 
 .stApp {
     background-color: #fbf9f4 !important;
@@ -251,15 +251,15 @@ h1, h2, h3 {
     font-size: 0.80rem;
 }
 
-/* ULTRA-COMPACT 2-COLUMN LIVE WATCHBOARD TABLE */
+/* LARGE-FONT, TIGHT-COLUMN 2-COLUMN LIVE WATCHBOARD TABLE */
 .live-board-grid {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: 10px;
+    gap: 8px;
     width: 100%;
     margin-top: 4px;
 }
-@media (max-width: 768px) {
+@media (max-width: 900px) {
     .live-board-grid {
         grid-template-columns: 1fr;
     }
@@ -268,58 +268,62 @@ h1, h2, h3 {
     width: 100%;
     border-collapse: collapse;
     background: #ffffff;
-    border: 1px solid #dcd6cb;
+    border: 1px solid #d4cec3;
     border-radius: 6px;
     overflow: hidden;
-    font-size: 0.78rem;
+    font-size: 1.12rem;
+    table-layout: auto;
 }
 .live-quote-table thead th {
     background: #0f291e;
     color: #f4efe6;
-    font-weight: 600;
-    font-size: 0.68rem;
+    font-weight: 700;
+    font-size: 0.82rem;
     text-transform: uppercase;
-    letter-spacing: 0.03em;
-    padding: 5px 7px;
+    letter-spacing: 0.02em;
+    padding: 6px 5px;
     text-align: right;
+    white-space: nowrap;
 }
 .live-quote-table thead th:nth-child(1),
 .live-quote-table thead th:nth-child(2) {
     text-align: left;
 }
 .live-quote-table tbody tr {
-    border-bottom: 1px solid #efebe4;
-    line-height: 1.15;
+    border-bottom: 1px solid #eae5dc;
+    line-height: 1.25;
 }
 .live-quote-table tbody tr:nth-child(even) {
     background-color: #faf8f5;
 }
 .live-quote-table tbody tr:hover {
-    background-color: #f0fdf4;
+    background-color: #ecfdf5;
 }
 .live-quote-table td {
-    padding: 4px 7px;
+    padding: 5px 5px;
     text-align: right;
     white-space: nowrap;
     font-variant-numeric: tabular-nums;
 }
 .live-quote-table td:nth-child(1) {
     text-align: left;
-    color: #71717a;
-    font-size: 0.68rem;
-    width: 22px;
-    padding-right: 2px;
+    font-size: 0.94rem;
+    font-weight: 700;
+    padding-left: 6px;
+    padding-right: 4px;
 }
 .live-quote-table td:nth-child(2) {
     text-align: left;
-    font-weight: 700;
+    font-weight: 800;
+    padding-left: 4px;
+    padding-right: 4px;
 }
 .rt-sym-link {
     color: #0f291e !important;
     text-decoration: none !important;
-    font-weight: 700;
-    font-size: 0.82rem;
-    border-bottom: 1px dashed #c5a059;
+    font-weight: 800;
+    font-size: 1.18rem;
+    border-bottom: 2px solid #c5a059;
 }
 .rt-sym-link:hover {
     color: #15803d !important;
@@ -329,9 +333,9 @@ h1, h2, h3 {
 }
 .rt-dossier-link {
     text-decoration: none !important;
-    font-size: 0.70rem;
-    margin-left: 4px;
-    opacity: 0.65;
+    font-size: 0.85rem;
+    margin-left: 3px;
+    opacity: 0.7;
 }
 .rt-dossier-link:hover {
     opacity: 1.0;
@@ -421,7 +425,6 @@ watchlists = load_json(DATA_FILE, {
     "Special Case Stocks": ["COIN", "MSTR", "SOXL", "IONQ"]
 })
 
-# Ensure all 3 core watchlists always exist
 if "Active Portfolio" not in watchlists:
     watchlists["Active Portfolio"] = ["NVDA", "SLV"]
 if "Opportunity Radar" not in watchlists:
@@ -833,36 +836,42 @@ def analyze_dual_playbook(df, account_size=100000, spy_ret_63d=0.0, df_1h=None):
         action_signal = "BUY NOW (TCT BOS)"
         action_badge = "badge-tct-buy"
         action_dot = "🟢"
+        short_sig = "🟢 Buy Now"
         action_explain = f"TCT accumulation breakout above BOS (${bos_level:,.2f}) targeting Range High (${target_price:,.2f})."
         action_priority = 0
     elif tct_valid_range and curr_close < bos_level:
         action_signal = "WATCHING TCT BOX"
         action_badge = "badge-tct-watch"
         action_dot = "📐"
+        short_sig = "📐 TCT Box"
         action_explain = f"Valid 25+ bar TCT bottom box formed. Buy if price closes above BOS ${bos_level:,.2f}."
         action_priority = 1
     elif not tct_valid_range and curr_close > ema50 and curr_close > ema20 and just_crossed_bos and r_multiple >= 2.0:
         action_signal = "BUY NOW (MOMENTUM)"
         action_badge = "badge-tct-buy"
         action_dot = "🟢"
+        short_sig = "🟢 Buy Now"
         action_explain = f"Uptrend breakout above ${bos_level:,.2f} with {r_multiple:.1f}R swing target at ${target_price:,.2f}."
         action_priority = 0
     elif curr_close > ema50 and curr_close >= ema20 * 0.99:
         action_signal = "HOLD / BUY DIP"
         action_badge = "badge-trend"
         action_dot = "🔵"
+        short_sig = "🔵 Uptrend"
         action_explain = f"Strong uptrend above 20 & 50 EMA. Swing target ${target_price:,.2f}, trailing stop ${effective_stop:,.2f}."
         action_priority = 2
     elif curr_close < ema50 and not tct_valid_range:
         action_signal = "SELL / AVOID"
         action_badge = "badge-tct-sell"
         action_dot = "🔴"
+        short_sig = "🔴 Below 50"
         action_explain = f"Below 50-day EMA (${ema50:,.2f}) without a valid TCT bottom box. Protect capital."
         action_priority = 4
     else:
         action_signal = "WAIT FOR TRIGGER"
         action_badge = "badge-candidate"
         action_dot = "🟡"
+        short_sig = "🟡 Wait"
         action_explain = f"Consolidating. Wait for a clean move above ${bos_level:,.2f} before entering."
         action_priority = 3
 
@@ -875,6 +884,7 @@ def analyze_dual_playbook(df, account_size=100000, spy_ret_63d=0.0, df_1h=None):
         "TCT_Action": action_signal,
         "TCT_Badge": action_badge,
         "TCT_Dot": action_dot,
+        "TCT_Short_Sig": short_sig,
         "TCT_Explain": action_explain,
         "TCT_Priority": action_priority,
         "BOS_Entry": entry_ref,
@@ -1154,7 +1164,6 @@ def render_sparkline(prices, is_positive):
 
 # --- YAHOO-STYLE EDIT / REORDER / MULTI-WATCHLIST HELPER ---
 def render_watchlist_reorder_panel(folder_name, key_prefix="wl"):
-    """Renders Yahoo Finance-style Up / Down / Top reorder controls + Create/Delete Watchlist."""
     st.markdown(
         '<div style="background:#ffffff; border:1px solid #dcd6cb; border-radius:8px; padding:12px 16px; margin-bottom:12px;">',
         unsafe_allow_html=True
@@ -1184,7 +1193,6 @@ def render_watchlist_reorder_panel(folder_name, key_prefix="wl"):
     if not syms:
         st.info("This watchlist is currently empty. Add a stock symbol above!")
     else:
-        # Render in 2 side-by-side columns so editing is also compact
         e_col1, e_col2 = st.columns(2)
         half = (len(syms) + 1) // 2
         for i, s in enumerate(syms):
@@ -1269,7 +1277,7 @@ def fetch_macro_and_regime():
 # 1. PRIMARY SIDEBAR NAVIGATION
 # ==============================================================================
 st.sidebar.markdown(
-    """<div style="padding: 10px 0 20px 0;"><span style="display: inline-block; width: 9px; height: 9px; background: #22c55e; border-radius: 50%; margin-right: 6px;"></span><span style="font-size: 0.85rem; font-weight: 600; letter-spacing: 0.05em; color: #a1a1aa;">LIVE + 15M RESEARCH</span><h2 style="color: #f4efe6 !important; margin: 6px 0 0 0; font-size: 1.4rem;">Ledger</h2><span style="font-size: 0.75rem; color: #c5a059; text-transform: uppercase; letter-spacing: 0.1em; font-weight: 600;">Momentum & TCT v10.0</span></div>""", 
+    """<div style="padding: 10px 0 20px 0;"><span style="display: inline-block; width: 9px; height: 9px; background: #22c55e; border-radius: 50%; margin-right: 6px;"></span><span style="font-size: 0.85rem; font-weight: 600; letter-spacing: 0.05em; color: #a1a1aa;">LIVE + 15M RESEARCH</span><h2 style="color: #f4efe6 !important; margin: 6px 0 0 0; font-size: 1.4rem;">Ledger</h2><span style="font-size: 0.75rem; color: #c5a059; text-transform: uppercase; letter-spacing: 0.1em; font-weight: 600;">Momentum & TCT v10.1</span></div>""", 
     unsafe_allow_html=True
 )
 
@@ -1523,12 +1531,14 @@ else:
                 )
 
     elif navigation == "⚡ Live Real-Time Quotes":
-        # FULL-SCREEN MODE: Remove top padding so the 2-column live watchboard fills the screen
+        # RELAXED TOP MARGIN: Prevents top pull-down menus from being cut off while keeping full-screen width
         st.markdown("""
         <style>
         .block-container {
-            padding-top: 1.1rem !important;
+            padding-top: 2.8rem !important;
             padding-bottom: 1rem !important;
+            padding-left: 1.2rem !important;
+            padding-right: 1.2rem !important;
         }
         </style>
         """, unsafe_allow_html=True)
@@ -1536,7 +1546,7 @@ else:
         folder_names = list(watchlists.keys())
         folder_options = folder_names + ["All Watchlists Combined"]
 
-        # Slim Single-Row Control Bar at the very top
+        # Slim Single-Row Control Bar at the top
         ctrl1, ctrl2, ctrl3, ctrl4, ctrl5 = st.columns([2.1, 2.2, 1.8, 0.9, 1.3])
         with ctrl1:
             selected_live_folder = st.selectbox("Watchlist", folder_options, index=0, label_visibility="collapsed")
@@ -1574,7 +1584,6 @@ else:
             target_edit_folder = selected_live_folder if selected_live_folder != "All Watchlists Combined" else folder_names[0]
             render_watchlist_reorder_panel(target_edit_folder, key_prefix="live_ed")
 
-        # Determine active symbol list
         if selected_live_folder == "All Watchlists Combined":
             active_live_syms = get_all_monitored_tickers()
         else:
@@ -1582,7 +1591,6 @@ else:
 
         live_records = fetch_batch_market_data(active_live_syms, account_size=settings["account_size"])
 
-        # Apply Selected Ranking / Sorting
         ordered_syms = [s for s in active_live_syms if s in live_records]
         if live_sort == "Rank: 🟢 Action Signal (Buy First)":
             ordered_syms = sorted(ordered_syms, key=lambda s: (live_records[s]["TCT_Priority"], -live_records[s]["Score"]))
@@ -1595,31 +1603,30 @@ else:
         elif live_sort == "Rank: 💯 Composite Score":
             ordered_syms = sorted(ordered_syms, key=lambda s: live_records[s]["Score"], reverse=True)
 
-        # Build Ultra-Compact 2-Column HTML Tables (Left Column: Top Half | Right Column: Bottom Half)
-        def build_half_table_html(sym_slice, start_rank):
+        # Build Large-Font, Tight-Width 2-Column HTML Tables (Signal replaces Rank #)
+        def build_half_table_html(sym_slice):
             rows_html = ""
-            for idx_offset, sym in enumerate(sym_slice):
-                rk = start_rank + idx_offset
+            for sym in sym_slice:
                 d = live_records[sym]
                 chg = d["Change"]
                 pct = d["Change_Pct"]
                 color = "#15803d" if chg >= 0 else "#b91c1c"
-                sign = "+" if chg >= 0 else ""
-                dot = d.get("TCT_Dot", "🔵")
+                sign = "+" if chg >= 0 else "-"
+                short_sig = d.get("TCT_Short_Sig", "🔵 Uptrend")
                 rows_html += (
                     f'<tr>'
-                    f'<td>{rk}</td>'
-                    f'<td>{dot} <a href="?rt_chart={sym}" target="_self" class="rt-sym-link" title="Tap to open live chart below">{sym}</a>'
+                    f'<td>{short_sig}</td>'
+                    f'<td><a href="?rt_chart={sym}" target="_self" class="rt-sym-link" title="Tap to open live chart below">{sym}</a>'
                     f'<a href="?inspect={sym}" target="_self" class="rt-dossier-link" title="Open Full TCT Dossier">📋</a></td>'
-                    f'<td style="font-weight:700; color:#18181b;">${d["Price"]:,.2f}</td>'
-                    f'<td style="color:{color}; font-weight:600;">{sign}${abs(chg):.2f} ({sign}{pct:.2f}%)</td>'
-                    f'<td style="color:#15803d;">${d["Day_High"]:,.2f}</td>'
-                    f'<td style="color:#b91c1c;">${d["Day_Low"]:,.2f}</td>'
+                    f'<td style="font-weight:800; color:#18181b;">{d["Price"]:,.2f}</td>'
+                    f'<td style="color:{color}; font-weight:700;">{sign}{abs(chg):.2f} ({ "+" if pct >= 0 else "" }{pct:.2f}%)</td>'
+                    f'<td style="color:#15803d; font-weight:600;">{d["Day_High"]:,.2f}</td>'
+                    f'<td style="color:#b91c1c; font-weight:600;">{d["Day_Low"]:,.2f}</td>'
                     f'</tr>'
                 )
             return (
                 f'<table class="live-quote-table">'
-                f'<thead><tr><th>#</th><th>Symbol</th><th>Live Price</th><th>Day Chg ($ / %)</th><th>Day High</th><th>Day Low</th></tr></thead>'
+                f'<thead><tr><th>Signal</th><th>Symbol</th><th>Price</th><th>Day Chg</th><th>High</th><th>Low</th></tr></thead>'
                 f'<tbody>{rows_html}</tbody></table>'
             )
 
@@ -1628,14 +1635,14 @@ else:
             left_syms = ordered_syms[:mid]
             right_syms = ordered_syms[mid:]
 
-            left_table_html = build_half_table_html(left_syms, 1)
-            right_table_html = build_half_table_html(right_syms, mid + 1) if right_syms else ""
+            left_table_html = build_half_table_html(left_syms)
+            right_table_html = build_half_table_html(right_syms) if right_syms else ""
 
             st.markdown(
                 f'<div class="live-board-grid"><div>{left_table_html}</div><div>{right_table_html}</div></div>',
                 unsafe_allow_html=True
             )
-            st.caption("🟢 Buy Now · 📐 In TCT Box · 🔵 Hold/Uptrend · 🟡 Wait · 🔴 Below 50 EMA  |  **Tap any Stock Symbol** to open its Live Chart below · Tap **📋** for Full TCT Dossier.")
+            st.caption("🟢 Buy Now · 📐 TCT Box · 🔵 Uptrend · 🟡 Wait · 🔴 Below 50 EMA  |  **Tap any Stock Symbol** to open its Live Chart below · Tap **📋** for Full TCT Dossier.")
         else:
             st.info("No symbols found in this watchlist. Use the box above or '✏️ Edit / Reorder' to add stocks.")
 
@@ -1937,7 +1944,7 @@ else:
 
                 with target_c:
                     st.markdown(
-                        f'<div class="stock-card"><div style="display: flex; justify-content: space-between; align-items: flex-start;"><div><a href="?inspect={d["Ticker"]}" target="_self" class="ticker-link">#{idx+1} · 📊 {d["Ticker"]}</a><span class="badge {d["TCT_Badge"]}" style="margin-left: 8px;">{d["TCT_Action"]}</span><span class="badge {d["Badge"]}" style="margin-left: 4px;">{d["State"]}</span>{rs_html}{earn_html}<div style="font-size: 1.35rem; font-weight: 700; margin-top: 6px;">${d["Price"]:,.2f} <span style="font-size: 0.9rem; color: {"#15803d" if d["Change"]>=0 else "#b91c1c"}; font-weight: 600;">{"+" if d["Change"]>=0 else ""}{d["Change_Pct"]:.2f}%</span></div></div><div style="text-align: right;"><div style="font-size: 1.6rem; font-weight: 700; color: #c5a059; font-family: \'Newsreader\', serif;">{d["Score"]}</div><div style="font-size: 0.7rem; color: #71717a; text-transform: uppercase;">Score</div></div></div><div class="trade-ticket"><div style="display: flex; justify-content: space-between; font-weight: 600; color: #0f291e; margin-bottom: 4px;"><span>🎯 Buy Trigger: ${d["BOS_Level"]:,.2f}</span><span>📐 Reward/Risk: {d["R_Multiple"]:.1f}R</span></div><div style="display: flex; justify-content: space-between;"><span>🟢 <b>Take Profit:</b> <span style="color:#15803d; font-weight:700;">${d["Target_Price"]:,.2f}</span> (+{d["Target_Pct"]:.1f}%)</span><span>🔴 <b>Stop-Loss:</b> <span style="color:#b91c1c; font-weight:700;">${d["Stop_Price"]:,.2f}</span> ({d["Stop_Pct"]:.1f}%)</span></div><div style="margin-top: 4px; font-size: 0.76rem; color: #52525b; display: flex; justify-content: space-between;"><span><b>0.5% Risk Size:</b> Buy {d["Shares_05Pct"]} shares (${d["Pos_Value"]:,.0f})</span><span><b>{d["TCT_Model"]}</b></span></div></div><div style="display: flex; justify-content: space-between; align-items: center; margin-top: 8px; font-size: 0.78rem; color: #52525b;"><div>Day High: <b>${d["Day_High"]:,.2f}</b></div><div>Day Low: <b>${d["Day_Low"]:,.2f}</b></div><div>RSI: <b>{d["RSI"]:.1f}</b></div><div>EMA 50: <b>${d["History"]["EMA50"].iloc[-1]:,.2f}</b></div></div><div style="font-size: 0.80rem; color: #475569; margin-top: 6px; font-style: italic;">"{d["TCT_Explain"]}"</div></div>',
+                        f'<div class="stock-card"><div style="display: flex; justify-content: space-between; align-items: flex-start;"><div><a href="?inspect={d["Ticker"]}" target="_self" class="ticker-link">📊 {d["Ticker"]}</a><span class="badge {d["TCT_Badge"]}" style="margin-left: 8px;">{d["TCT_Action"]}</span><span class="badge {d["Badge"]}" style="margin-left: 4px;">{d["State"]}</span>{rs_html}{earn_html}<div style="font-size: 1.35rem; font-weight: 700; margin-top: 6px;">${d["Price"]:,.2f} <span style="font-size: 0.9rem; color: {"#15803d" if d["Change"]>=0 else "#b91c1c"}; font-weight: 600;">{"+" if d["Change"]>=0 else ""}{d["Change_Pct"]:.2f}%</span></div></div><div style="text-align: right;"><div style="font-size: 1.6rem; font-weight: 700; color: #c5a059; font-family: \'Newsreader\', serif;">{d["Score"]}</div><div style="font-size: 0.7rem; color: #71717a; text-transform: uppercase;">Score</div></div></div><div class="trade-ticket"><div style="display: flex; justify-content: space-between; font-weight: 600; color: #0f291e; margin-bottom: 4px;"><span>🎯 Buy Trigger: ${d["BOS_Level"]:,.2f}</span><span>📐 Reward/Risk: {d["R_Multiple"]:.1f}R</span></div><div style="display: flex; justify-content: space-between;"><span>🟢 <b>Take Profit:</b> <span style="color:#15803d; font-weight:700;">${d["Target_Price"]:,.2f}</span> (+{d["Target_Pct"]:.1f}%)</span><span>🔴 <b>Stop-Loss:</b> <span style="color:#b91c1c; font-weight:700;">${d["Stop_Price"]:,.2f}</span> ({d["Stop_Pct"]:.1f}%)</span></div><div style="margin-top: 4px; font-size: 0.76rem; color: #52525b; display: flex; justify-content: space-between;"><span><b>0.5% Risk Size:</b> Buy {d["Shares_05Pct"]} shares (${d["Pos_Value"]:,.0f})</span><span><b>{d["TCT_Model"]}</b></span></div></div><div style="display: flex; justify-content: space-between; align-items: center; margin-top: 8px; font-size: 0.78rem; color: #52525b;"><div>Day High: <b>${d["Day_High"]:,.2f}</b></div><div>Day Low: <b>${d["Day_Low"]:,.2f}</b></div><div>RSI: <b>{d["RSI"]:.1f}</b></div><div>EMA 50: <b>${d["History"]["EMA50"].iloc[-1]:,.2f}</b></div></div><div style="font-size: 0.80rem; color: #475569; margin-top: 6px; font-style: italic;">"{d["TCT_Explain"]}"</div></div>',
                         unsafe_allow_html=True
                     )
 
