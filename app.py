@@ -1,4 +1,5 @@
 import streamlit as st
+import streamlit.components.v1 as components
 import yfinance as yf
 import pandas as pd
 import numpy as np
@@ -27,8 +28,9 @@ if "inspect_symbol" not in st.session_state:
     st.session_state.inspect_symbol = None
 if "screener_matches" not in st.session_state:
     st.session_state.screener_matches = None
+if "screener_title" not in st.session_state:
+    st.session_state.screener_title = None
 
-# Read ?inspect=TICKER from URL when user clicks a stock symbol
 if "inspect" in st.query_params:
     clicked_sym = st.query_params.get("inspect", "").strip().upper()
     if clicked_sym:
@@ -39,17 +41,27 @@ def clear_inspection():
     if "inspect" in st.query_params:
         st.query_params.clear()
 
-# --- NTFY ALERT ENGINE ---
-def send_ntfy_alert(message, title="Momentum & TCT Alert"):
+# --- NTFY ALERT ENGINE (ASCII-SAFE HEADER FIX) ---
+def send_ntfy_alert(message, title="Daily Portfolio Briefing"):
     try:
+        # HTTP headers in urllib MUST be ASCII-only (no emojis in Title header)
+        ascii_title = title.encode("ascii", "ignore").decode("ascii").strip()
+        if not ascii_title:
+            ascii_title = "Momentum and TCT Alert"
         req = urllib.request.Request(
             "https://ntfy.sh/2026_USstockspicks",
             data=message.encode("utf-8"),
-            headers={"Title": title, "Priority": "high"}
+            headers={
+                "Title": ascii_title,
+                "Priority": "high",
+                "Content-Type": "text/plain; charset=utf-8"
+            },
+            method="POST"
         )
-        urllib.request.urlopen(req, timeout=5)
-    except Exception:
-        pass
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            return True, f"Delivered (HTTP {resp.status}) to topic '2026_USstockspicks'"
+    except Exception as e:
+        return False, f"ntfy error: {str(e)}"
 
 # --- CUSTOM CSS: MANUS EDITORIAL THEME + CLICKABLE TICKERS ---
 st.markdown("""
@@ -229,7 +241,7 @@ h1, h2, h3 {
 """, unsafe_allow_html=True)
 
 
-# --- GITHUB AUTO-SYNC FOR WATCHLISTS.JSON (OPTION B) ---
+# --- GITHUB AUTO-SYNC FOR WATCHLISTS.JSON ---
 DATA_FILE = "watchlists.json"
 SETTINGS_FILE = "settings.json"
 GITHUB_REPO = "lingpesos-web/quality-momentum"
@@ -260,7 +272,6 @@ def save_json(filepath, data):
         pass
 
 def sync_watchlists_to_github(data):
-    """Pushes updated watchlists.json directly to GitHub repository via API."""
     save_json(DATA_FILE, data)
     token = get_github_token()
     if not token:
@@ -273,7 +284,6 @@ def sync_watchlists_to_github(data):
         "User-Agent": "Quality-Momentum-Cockpit"
     }
     try:
-        # 1. Fetch current file SHA on GitHub
         req_get = urllib.request.Request(f"{api_url}?ref={GITHUB_BRANCH}", headers=headers)
         sha = None
         try:
@@ -283,7 +293,6 @@ def sync_watchlists_to_github(data):
         except Exception:
             pass
 
-        # 2. Push updated watchlists.json content
         json_bytes = json.dumps(data, indent=2).encode("utf-8")
         b64_content = base64.b64encode(json_bytes).decode("utf-8")
         payload = {
@@ -302,7 +311,7 @@ def sync_watchlists_to_github(data):
         )
         with urllib.request.urlopen(req_put, timeout=8) as resp:
             if resp.status in (200, 201):
-                return True, "✅ Permanently synced to GitHub watchlists.json!"
+                return True, "Permanently synced to GitHub watchlists.json!"
     except Exception as e:
         return False, f"Saved locally (GitHub sync error: {str(e)[:60]})"
     return False, "Saved locally."
@@ -325,19 +334,51 @@ if "max_news_age_hours" not in settings:
     settings["max_news_age_hours"] = 72
 
 
-# --- UNIVERSE DEFINITION ---
+# --- EXPANDED ~220-STOCK LIQUID MARKET UNIVERSE (OPTION 2) ---
 GICS_SECTORS = {
-    "Information Technology": ["AAPL", "MSFT", "NVDA", "AVGO", "ADBE", "CRM", "AMD", "INTC", "CSCO", "QCOM", "TXN", "AMAT", "LRCX", "MU", "PANW", "CRWD", "CRDO", "VRT", "COHR", "SNDK", "GLW", "CLS", "LITE", "STX", "WDC", "IONQ", "QUBT", "APP"],
-    "Communication Services": ["GOOGL", "META", "NFLX", "TMUS", "CMCSA", "DIS", "CHTR"],
-    "Consumer Discretionary": ["AMZN", "TSLA", "HD", "MCD", "NKE", "SBUX", "BKNG", "LULU", "EBAY"],
-    "Consumer Staples": ["WMT", "COST", "PG", "KO", "PEP", "PM", "MDLZ", "KDP"],
-    "Health Care": ["LLY", "UNH", "JNJ", "ABBV", "MRK", "TMO", "AMGN", "GILD", "ISRG", "VRTX", "ADPT", "TEM"],
-    "Financials": ["JPM", "V", "MA", "BAC", "WFC", "MS", "GS", "AXP", "BLK", "HOOD", "SOFI", "COIN", "MSTR", "CRCL"],
-    "Industrials": ["GE", "CAT", "UNP", "HON", "BA", "RTX", "DE", "LMT", "ADP", "FAST", "IREN"],
-    "Energy": ["XOM", "CVX", "COP", "SLB", "EOG", "BKR"],
-    "Materials": ["LIN", "SHW", "FCX", "NEM", "APD", "ECL", "CDE", "SLV"],
-    "Utilities": ["NEE", "SO", "DUK", "CEG", "AEP", "EXC"],
-    "Real Estate": ["PLD", "AMT", "EQIX", "PSA", "O"]
+    "AI, Semiconductors & Hardware": [
+        "NVDA", "AVGO", "AMD", "MU", "TSM", "ASML", "AMAT", "LRCX", "KLAC", "MRVL",
+        "ARM", "QCOM", "TXN", "ADI", "ON", "MPWR", "NXPI", "MCHP", "TER", "ENTG",
+        "CRDO", "VRT", "COHR", "LITE", "CIEN", "FN", "ANET", "SMCI", "DELL", "HPE",
+        "SNDK", "STX", "WDC", "NTAP", "PSTG", "GLW", "CLS", "JBL", "FLEX", "APH"
+    ],
+    "Software, Cloud & Cybersecurity": [
+        "MSFT", "ORCL", "CRM", "ADBE", "NOW", "INTU", "PLTR", "APP", "SNOW", "PANW",
+        "CRWD", "FTNT", "ZS", "NET", "DDOG", "MDB", "TEAM", "WDAY", "HUBS", "TTD",
+        "IOT", "DUOL", "MNDY", "PATH", "CFLT", "GTLB", "S", "OKTA", "CYBR", "DOCU"
+    ],
+    "Quantum, Space & Next-Gen Tech": [
+        "IONQ", "QUBT", "RGTI", "QBTS", "ARQQ", "RKLB", "ASTS", "LUNR", "PL", "SPIR",
+        "JOBY", "ACHR", "SERV", "SOUN", "BBAI", "SYM", "UPST", "AFRM", "RDDT", "ALAB"
+    ],
+    "Crypto, Fintech & Financials": [
+        "COIN", "MSTR", "HOOD", "SOFI", "SQ", "PYPL", "MARA", "RIOT", "CLSK", "IREN",
+        "CORZ", "HUT", "WULF", "CIFR", "GALAXY", "JPM", "GS", "MS", "BLK", "BX",
+        "KKR", "APO", "ARES", "V", "MA", "AXP", "BAC", "WFC", "C", "SCHW"
+    ],
+    "Communication & Internet Leaders": [
+        "GOOGL", "META", "NFLX", "AMZN", "AAPL", "TSLA", "SPOT", "UBER", "DASH", "ABNB",
+        "BKNG", "EXPE", "TMUS", "DIS", "CMCSA", "RBLX", "U", "EA", "TTWO", "PINS"
+    ],
+    "Energy, Nuclear & Precious Metals": [
+        "CEG", "VST", "NRG", "TLN", "OKLO", "SMR", "CCJ", "UEC", "NXE", "DNN",
+        "NEE", "SO", "DUK", "GEV", "XOM", "CVX", "COP", "EOG", "SLB", "HAL",
+        "NEM", "GOLD", "AEM", "WPM", "FNV", "PAAS", "AG", "CDE", "HL", "FCX", "SLV", "GLD"
+    ],
+    "Industrials, Defense & Infrastructure": [
+        "GE", "CAT", "ETN", "PWR", "EME", "FIX", "URI", "PH", "TT", "CARR",
+        "RTX", "LMT", "NOC", "GD", "LHX", "HII", "AXON", "TDG", "HEI", "HWM",
+        "UNP", "CSX", "FDX", "UPS", "DE", "HON", "WM", "RSG"
+    ],
+    "Health Care & Biotech Innovators": [
+        "LLY", "NVO", "VRTX", "REGN", "AMGN", "GILD", "ISRG", "SYK", "BSX", "MDT",
+        "ABT", "TMO", "DHR", "UNH", "ELV", "CI", "HCA", "IDXX", "DXCM", "PODD",
+        "ADPT", "TEM", "EXAS", "NTRA", "GH", "TWST", "CRSP", "NTLA", "BEAM", "VKTX"
+    ],
+    "Consumer & Retail Powerhouses": [
+        "WMT", "COST", "TGT", "HD", "LOW", "TJX", "ROST", "NKE", "ONON", "DECK",
+        "LULU", "SBUX", "CMG", "CAVA", "SHAK", "MCD", "YUM", "DPZ", "PG", "KO", "PEP", "PM"
+    ]
 }
 
 # --- STRICT FRESHNESS & ANTI-CLICKBAIT NEWS ENGINE ---
@@ -372,7 +413,6 @@ def format_age_badge(age_hours):
         return f"{days}d ago"
 
 def _fetch_rss_raw(query, max_per_query=18, ticker_tag=None, max_age_hours=72):
-    # Force when:3d in Google RSS query so Google only indexes recent articles
     q_with_time = query if "when:" in query else f"{query} when:3d"
     encoded_query = urllib.parse.quote(q_with_time)
     url = f"https://news.google.com/rss/search?q={encoded_query}&hl=en-US&gl=US&ceid=US:en"
@@ -392,7 +432,6 @@ def _fetch_rss_raw(query, max_per_query=18, ticker_tag=None, max_age_hours=72):
             if not raw_title or not pub_date_raw:
                 continue
 
-            # 1. Block known re-hash aggregator blogs
             src_lower = source.lower().strip()
             if any(bad in src_lower for bad in BLOCKED_NEWS_SOURCES):
                 continue
@@ -402,7 +441,6 @@ def _fetch_rss_raw(query, max_per_query=18, ticker_tag=None, max_age_hours=72):
             if any(pat in title_lower for pat in STALE_HEADLINE_PATTERNS):
                 continue
 
-            # 2. Strict timestamp verification (must be within max_age_hours)
             dt_obj = parse_pub_date(pub_date_raw)
             if dt_obj is None:
                 continue
@@ -495,7 +533,6 @@ def fetch_metals_crypto_fx_news(max_items=50, max_age_hours=72):
 # --- EARNINGS WARNING HELPER ---
 @st.cache_data(ttl=14400)
 def fetch_upcoming_earnings_map(tickers):
-    """Returns {ticker: (days_until_earnings, date_str)} for stocks reporting within 14 days."""
     if not tickers:
         return {}
     out = {}
@@ -527,16 +564,22 @@ def fetch_upcoming_earnings_map(tickers):
     return out
 
 
-# --- TCT ACCUMULATION STRATEGY ENGINE (RULES HANDBOOK) ---
-def analyze_tct_strategy(df, account_size=100000, spy_ret_63d=0.0):
+# --- DUAL-PLAYBOOK ENGINE: TRUE TCT ACCUMULATION vs. MOMENTUM TREND SWING ---
+def analyze_dual_playbook(df, account_size=100000, spy_ret_63d=0.0, df_1h=None):
+    """
+    Separates True TCT Bottom Accumulation (after >=25 bars of decline)
+    from Momentum Trend Swings (for uptrending stocks) so Buy Triggers,
+    Stop-Losses, and Take Profit Targets are always realistic and near current price.
+    """
     n = len(df)
     close_arr = df["Close"].values.astype(float)
     high_arr = df["High"].values.astype(float)
     low_arr = df["Low"].values.astype(float)
     vol_arr = df["Volume"].values.astype(float)
     curr_close = float(close_arr[-1])
+    prev_close = float(close_arr[-2]) if n >= 2 else curr_close
 
-    # Relative Strength vs S&P 500 (Handbook Sec 10: 3-Month / 63-Day RS)
+    # Relative Strength vs S&P 500 (63-Day / 3-Month)
     lookback_rs = min(63, n - 1)
     stock_ret_63d = ((curr_close - float(close_arr[-1 - lookback_rs])) / float(close_arr[-1 - lookback_rs])) * 100.0 if lookback_rs > 5 else 0.0
     rs_diff = stock_ret_63d - spy_ret_63d
@@ -546,7 +589,7 @@ def analyze_tct_strategy(df, account_size=100000, spy_ret_63d=0.0):
     dollar_vol_20 = pd.Series(close_arr[-20:] * vol_arr[-20:]).median() if n >= 20 else 0.0
     liq_pass = bool(dollar_vol_20 >= 50_000_000)
 
-    # 2. ATR(14) & 1H ATR Approximation for Stop Calculation
+    # 2. ATR(14) Daily & 1H Estimation
     tr1 = df["High"] - df["Low"]
     tr2 = (df["High"] - df["Close"].shift(1)).abs()
     tr3 = (df["Low"] - df["Close"].shift(1)).abs()
@@ -555,7 +598,10 @@ def analyze_tct_strategy(df, account_size=100000, spy_ret_63d=0.0):
         atr14_daily = curr_close * 0.025
     atr14_1h_est = atr14_daily / 2.55
 
-    # 3. Confirmed Swing Points (k = 3)
+    ema20 = float(df["Close"].ewm(span=20, adjust=False).mean().iloc[-1])
+    ema50 = float(df["Close"].ewm(span=50, adjust=False).mean().iloc[-1])
+
+    # 3. Confirmed Daily Swing Points (k = 3)
     swing_highs = []
     swing_lows = []
     for i in range(3, n - 3):
@@ -564,11 +610,12 @@ def analyze_tct_strategy(df, account_size=100000, spy_ret_63d=0.0):
         if low_arr[i] == np.min(low_arr[i - 3:i + 4]):
             swing_lows.append((i, float(low_arr[i])))
 
-    # 4. Scan recent history for a TCT Accumulation Range
-    lookback = min(n, 140)
+    # 4. Check for a Genuine TCT Bottom Accumulation Range (Handbook Sec 3 & 4)
+    lookback = min(n, 130)
     start_idx = n - lookback
-    peak_rel_idx = int(np.argmax(high_arr[start_idx:max(start_idx + 1, n - 15)]))
+    peak_rel_idx = int(np.argmax(high_arr[start_idx:max(start_idx + 1, n - 20)]))
     peak_idx = start_idx + peak_rel_idx
+    peak_price = float(high_arr[peak_idx])
 
     recent_lows = [(idx, val) for idx, val in swing_lows if idx > peak_idx]
 
@@ -577,122 +624,154 @@ def analyze_tct_strategy(df, account_size=100000, spy_ret_63d=0.0):
     no_vertical_flush = True
     tap1_price, tap2_price, tap3_price = None, None, None
     range_high, bos_level = None, None
-    tct_model = "None"
+    playbook_name = "🚀 Momentum Trend Swing"
 
-    if len(recent_lows) >= 2:
+    # A stock is only a bottoming candidate if it has pulled back meaningfully from its prior peak
+    if len(recent_lows) >= 2 and curr_close <= peak_price * 0.92:
         for i_l in range(len(recent_lows) - 1):
             t1_idx, t1_val = recent_lows[i_l]
             for j_l in range(i_l + 1, len(recent_lows)):
                 t2_idx, t2_val = recent_lows[j_l]
-                if t2_idx - t1_idx < 2:
+                if t2_idx - t1_idx < 3 or (n - t2_idx) > 45:
                     continue
+                # Local bounce high between Tap 1 and Tap 2 (Automatic Rally ceiling)
                 r_high = float(np.max(high_arr[t1_idx:t2_idx + 1]))
-                if r_high <= t1_val * 1.02:
+                rng_height = r_high - t1_val
+                if rng_height <= t1_val * 0.03 or rng_height >= t1_val * 0.38:
                     continue
-                dev_limit = t1_val - 0.30 * (r_high - t1_val)
+                # Drop from prior peak into Tap 1 must be at least 30% of range height
+                if (peak_price - t1_val) < 0.30 * rng_height:
+                    continue
+                # Tap 2 sweeps or tests Tap 1 without closing below 30% deviation
+                dev_limit = t1_val - 0.30 * rng_height
                 min_close_t2 = float(np.min(close_arr[t1_idx:t2_idx + 1]))
                 if t2_val <= t1_val * 1.015 and min_close_t2 >= dev_limit:
+                    bars_decline = t2_idx - peak_idx
+                    if bars_decline < 25:
+                        continue
+                    slow_decline_25 = True
+                    # Check no vertical single-bar flush (80% down to 22% of range)
+                    flush_ok = True
+                    for b_i in range(t1_idx, t2_idx + 1):
+                        top_p = (high_arr[b_i] - t1_val) / rng_height
+                        bot_p = (low_arr[b_i] - t1_val) / rng_height
+                        if top_p >= 0.80 and bot_p <= 0.22:
+                            flush_ok = False
+                            break
+                    if not flush_ok:
+                        continue
+
                     tap1_price = t1_val
                     tap2_price = t2_val
                     range_high = r_high
-                    bars_decline = t2_idx - peak_idx
-                    slow_decline_25 = bool(bars_decline >= 25)
-                    rng_span = max(range_high - tap1_price, 1e-6)
-                    for b_i in range(t1_idx, t2_idx + 1):
-                        bar_top_pct = (high_arr[b_i] - tap1_price) / rng_span
-                        bar_bot_pct = (low_arr[b_i] - tap1_price) / rng_span
-                        if bar_top_pct >= 0.80 and bar_bot_pct <= 0.22:
-                            no_vertical_flush = False
-                    post_t2_highs = [(idx, val) for idx, val in swing_highs if idx > t2_idx]
-                    if post_t2_highs:
-                        push_idx, push_val = post_t2_highs[0]
-                        if push_val > tap1_price and t2_idx + 3 < n:
-                            win_start = min(push_idx + 3, n - 1)
-                            tap3_price = float(np.min(low_arr[win_start:]))
-                            tct_model = "Model 1 (Tap 2 Sweep)" if tap3_price < tap2_price else "Model 2 (Higher Low / OB)"
-                            bos_candidates = [val for idx, val in swing_highs if idx >= push_idx and val < range_high]
-                            bos_level = float(bos_candidates[-1]) if bos_candidates else float(push_val)
-                            death_low = tap2_price - 0.30 * (range_high - tap2_price)
-                            if curr_close >= death_low and curr_close <= range_high * 1.03:
-                                tct_valid_range = True
-                    break
+                    # Tap 3 is the lowest low after Tap 2
+                    tap3_price = float(np.min(low_arr[t2_idx:]))
+
+                    # BOS Level: Use actual 1H last lower swing high if 1H dataframe provided,
+                    # otherwise use the immediate short-term 3-bar local minor high near Tap 3 (1% to 3.5% above low)
+                    if df_1h is not None and len(df_1h) >= 15:
+                        h1_highs = df_1h["High"].values.astype(float)
+                        h1_swings = [float(h1_highs[k]) for k in range(3, len(h1_highs) - 3) if h1_highs[k] == np.max(h1_highs[k - 3:k + 4])]
+                        recent_h1 = [v for v in h1_swings[-6:] if tap3_price * 1.005 <= v <= range_high * 0.96]
+                        bos_level = float(recent_h1[-1]) if recent_h1 else float(np.max(high_arr[-4:-1]))
+                    else:
+                        local_minor_high = float(np.max(high_arr[-5:-1])) if n >= 6 else curr_close * 1.015
+                        bos_level = min(local_minor_high, tap3_price + 0.35 * rng_height)
+                        bos_level = max(bos_level, tap3_price * 1.012)
+
+                    death_low = tap2_price - 0.30 * (range_high - tap2_price)
+                    if death_low <= curr_close <= range_high * 0.98:
+                        tct_valid_range = True
+                        Model_Tag = "TCT Model 1 (Sweep)" if tap3_price < tap2_price else "TCT Model 2 (Higher Low)"
+                        playbook_name = f"📐 {Model_Tag}"
+                        break
             if tct_valid_range:
                 break
 
-    recent_20_high = float(np.max(high_arr[-21:-1])) if n >= 22 else float(np.max(high_arr[-10:]))
-    recent_20_low = float(np.min(low_arr[-20:]))
-    high_52w = float(np.max(high_arr[-252:])) if n >= 252 else float(np.max(high_arr))
+    # 5. Calculate Realistic Buy Trigger, Stop-Loss, and Take Profit Target
+    if tct_valid_range and range_high and bos_level and tap3_price:
+        # PLAYBOOK A: True TCT Bottom Accumulation
+        entry_ref = curr_close if curr_close >= bos_level else bos_level
+        raw_stop = tap3_price - (0.5 * atr14_1h_est)
+        # Handbook Sec 7: Stop at least 2% below entry, capped at 7% max so stop isn't absurd
+        min_stop = entry_ref * 0.98
+        max_stop = entry_ref * 0.93
+        effective_stop = min(raw_stop, min_stop)
+        effective_stop = max(effective_stop, max_stop)
+        target_price = range_high
+    else:
+        # PLAYBOOK B: Momentum Trend Swing (Realistic Swing Levels near current price)
+        # Buy Trigger is immediate 5-day high breakout or current price if already breaking out
+        high_5d_prev = float(np.max(high_arr[-6:-1])) if n >= 7 else curr_close
+        if curr_close >= high_5d_prev:
+            bos_level = curr_close
+        elif (high_5d_prev - curr_close) / curr_close <= 0.035:
+            bos_level = high_5d_prev
+        else:
+            # Stock pulled back; trigger is reclaiming the 3-day high
+            bos_level = float(np.max(high_arr[-3:]))
 
-    if not tct_valid_range or range_high is None or bos_level is None or tap3_price is None:
-        tap1_price = float(np.min(low_arr[-40:-15])) if n >= 45 else recent_20_low
-        tap2_price = recent_20_low
+        entry_ref = curr_close if curr_close >= bos_level else bos_level
+        # Stop-Loss is 1.5x Daily ATR below entry (or just below 20-day EMA), clamped between -2.2% and -6.5%
+        atr_stop = entry_ref - (1.5 * atr14_daily)
+        ema_stop = min(ema20, entry_ref) - (0.5 * atr14_daily)
+        raw_stop = max(atr_stop, ema_stop)
+        effective_stop = min(raw_stop, entry_ref * 0.978)
+        effective_stop = max(effective_stop, entry_ref * 0.935)
+
+        risk_unit = entry_ref - effective_stop
+        # Realistic 2.5R swing target (typically +6% to +15%)
+        target_price = entry_ref + (2.5 * risk_unit)
         tap3_price = float(np.min(low_arr[-10:]))
-        range_high = float(np.max(high_arr[-60:])) if n >= 60 else high_52w
-        recent_sh = [val for idx, val in swing_highs if idx >= n - 25]
-        bos_level = float(recent_sh[-1]) if recent_sh else recent_20_high
-        if range_high <= bos_level * 1.03:
-            range_high = max(high_52w, curr_close + (2.5 * atr14_daily))
-
-    raw_stop = tap3_price - (0.5 * atr14_1h_est)
-    entry_ref = curr_close if curr_close >= bos_level else bos_level
-
-    stop_dist_pct = (entry_ref - raw_stop) / entry_ref if entry_ref > 0 else 0.02
-    stop_2pct_pass = bool(stop_dist_pct >= 0.02)
-    effective_stop = raw_stop if stop_2pct_pass else (entry_ref * 0.98)
-
-    target_price = range_high
-    if target_price <= entry_ref * 1.01:
-        target_price = entry_ref + max(2.2 * (entry_ref - effective_stop), 2.0 * atr14_daily)
 
     risk_per_share = max(entry_ref - effective_stop, 0.0001)
     reward_per_share = max(target_price - entry_ref, 0.0)
     r_multiple = reward_per_share / risk_per_share
 
+    # Handbook Sec 8: Risk 0.5% of account per trade
     risk_dollars = account_size * 0.005
     suggested_shares = max(1, int(risk_dollars / risk_per_share))
     position_value = suggested_shares * entry_ref
     target_gain_pct = ((target_price - entry_ref) / entry_ref) * 100.0
     stop_loss_pct = ((effective_stop - entry_ref) / entry_ref) * 100.0
 
-    prev_close = float(close_arr[-2]) if n >= 2 else curr_close
-    ema50 = float(df["Close"].ewm(span=50, adjust=False).mean().iloc[-1])
+    # 6. Plain-English Action Verdict
+    just_crossed_bos = (curr_close >= bos_level) and (prev_close < bos_level * 1.012)
 
-    just_crossed_bos = (curr_close >= bos_level) and (prev_close < bos_level * 1.015)
-
-    if curr_close <= effective_stop or curr_close < ema50 * 0.985:
-        action_signal = "SELL / EXIT"
-        action_badge = "badge-tct-sell"
-        action_explain = f"Price violated safety support (${effective_stop:,.2f}). Step aside or exit."
-        action_priority = 4
-    elif curr_close >= target_price * 0.995:
-        action_signal = "TAKE PROFIT (TARGET HIT)"
-        action_badge = "badge-tct-sell"
-        action_explain = f"Reached Range High target zone (${target_price:,.2f}). Lock in gains."
-        action_priority = 3
-    elif (tct_valid_range and curr_close >= bos_level and r_multiple >= 1.8) or (just_crossed_bos and r_multiple >= 2.0):
-        action_signal = "BUY NOW (BOS TRIGGERED)"
+    if tct_valid_range and curr_close >= bos_level and r_multiple >= 2.0:
+        action_signal = "BUY NOW (TCT BOS)"
         action_badge = "badge-tct-buy"
-        action_explain = f"Broke above BOS (${bos_level:,.2f}) with {r_multiple:.1f}R reward-to-risk."
+        action_explain = f"TCT accumulation breakout above BOS (${bos_level:,.2f}) targeting Range High (${target_price:,.2f})."
         action_priority = 0
     elif tct_valid_range and curr_close < bos_level:
-        action_signal = "WATCHING BOX (WAIT FOR BOS)"
+        action_signal = "WATCHING TCT BOX"
         action_badge = "badge-tct-watch"
-        action_explain = f"In TCT accumulation box. Wait for close above BOS ${bos_level:,.2f} to buy."
+        action_explain = f"Valid 25+ bar TCT bottom box formed. Buy if price closes above BOS ${bos_level:,.2f}."
         action_priority = 1
-    elif curr_close > ema50 and curr_close >= bos_level:
-        action_signal = "HOLD / RIDE TREND"
+    elif not tct_valid_range and curr_close > ema50 and curr_close > ema20 and just_crossed_bos and r_multiple >= 2.0:
+        action_signal = "BUY NOW (MOMENTUM)"
+        action_badge = "badge-tct-buy"
+        action_explain = f"Uptrend breakout above ${bos_level:,.2f} with {r_multiple:.1f}R swing target at ${target_price:,.2f}."
+        action_priority = 0
+    elif curr_close > ema50 and curr_close >= ema20 * 0.99:
+        action_signal = "HOLD / BUY DIP"
         action_badge = "badge-trend"
-        action_explain = f"Holding above support. Trail stop at ${effective_stop:,.2f}, target ${target_price:,.2f}."
+        action_explain = f"Strong uptrend above 20 & 50 EMA. Swing target ${target_price:,.2f}, trailing stop ${effective_stop:,.2f}."
         action_priority = 2
+    elif curr_close < ema50 and not tct_valid_range:
+        action_signal = "SELL / AVOID"
+        action_badge = "badge-tct-sell"
+        action_explain = f"Below 50-day EMA (${ema50:,.2f}) without a valid TCT bottom box. Protect capital."
+        action_priority = 4
     else:
-        action_signal = "WAIT (CONSOLIDATING)"
+        action_signal = "WAIT FOR TRIGGER"
         action_badge = "badge-candidate"
-        action_explain = f"Wait for breakout above ${bos_level:,.2f} before entering."
-        action_priority = 2
+        action_explain = f"Consolidating. Wait for a clean move above ${bos_level:,.2f} before entering."
+        action_priority = 3
 
     return {
         "TCT_Valid_Range": tct_valid_range,
-        "TCT_Model": tct_model if tct_valid_range else "Structure Levels",
+        "TCT_Model": playbook_name,
         "TCT_Slow_25": slow_decline_25 and no_vertical_flush,
         "TCT_Liq_50M": liq_pass,
         "TCT_2R_Pass": bool(r_multiple >= 2.0),
@@ -730,7 +809,6 @@ def fetch_batch_market_data(tickers, account_size=100000):
     except Exception:
         return {}
 
-    # Calculate S&P 500 3-Month (63-Day) benchmark return for Relative Strength
     spy_ret_63d = 0.0
     try:
         spy_df = data["^GSPC"].dropna() if len(download_list) > 1 and "^GSPC" in data.columns.levels[0] else pd.DataFrame()
@@ -795,15 +873,16 @@ def fetch_batch_market_data(tickers, account_size=100000):
             is_breakout = (close >= high20_prev) and (rvol >= 1.3)
             bb_upper_break = close >= float(df["BB_Upper"].iloc[-1])
             bb_lower_touch = float(df["Low"].iloc[-1]) <= float(df["BB_Lower"].iloc[-1])
+            ema20_val = float(df["EMA20"].iloc[-1])
             ema50_val = float(df["EMA50"].iloc[-1])
-            pullback_ema50 = abs(close - ema50_val) / ema50_val <= 0.025 if ema50_val > 0 else False
+            pullback_ema = (abs(close - ema20_val) / ema20_val <= 0.025) or (abs(close - ema50_val) / ema50_val <= 0.025)
             above_ema50 = close > ema50_val
             above_ema200 = close > float(df["EMA200"].iloc[-1]) if len(df) >= 200 else True
             within_52w = (close / float(df["High52"].iloc[-1])) >= 0.90 if float(df["High52"].iloc[-1]) > 0 else False
 
             if is_breakout and above_ema50:
                 state, badge_class, reason = "Confirmed Breakout", "badge-breakout", f"Closed above 20D high (${high20_prev:,.2f}) with {rvol:.1f}x volume"
-            elif above_ema50 and close > float(df["EMA20"].iloc[-1]):
+            elif above_ema50 and close > ema20_val:
                 state, badge_class, reason = "Active Trend", "badge-trend", "Holding steadily above 20-day & 50-day EMA support"
             elif close < ema50_val:
                 state, badge_class, reason = "Support Break", "badge-caution", "Violated 50-day EMA support level"
@@ -815,14 +894,14 @@ def fetch_batch_market_data(tickers, account_size=100000):
             fund_score = 80
             composite = int((fund_score * w_fund) + (tech_score * w_tech) + (mom_score * w_mom))
 
-            tct_info = analyze_tct_strategy(df, account_size=account_size, spy_ret_63d=spy_ret_63d)
+            tct_info = analyze_dual_playbook(df, account_size=account_size, spy_ret_63d=spy_ret_63d)
 
             record = {
                 "Ticker": t, "Price": close, "Change": change, "Change_Pct": change_pct,
                 "RSI": rsi, "RVOL": rvol, "MACD_Above_Zero": macd_above_zero,
                 "MACD_Cross": macd_cross, "Above_EMA50": above_ema50, "Above_EMA200": above_ema200,
                 "Is_Breakout": is_breakout, "BB_Upper_Break": bb_upper_break,
-                "BB_Lower_Touch": bb_lower_touch, "Pullback_EMA50": pullback_ema50,
+                "BB_Lower_Touch": bb_lower_touch, "Pullback_EMA50": pullback_ema,
                 "Within_52W": within_52w, "State": state, "Badge": badge_class,
                 "Reason": reason, "Score": composite,
                 "Sparkline": df["Close"].iloc[-15:].tolist(), "History": df
@@ -834,14 +913,18 @@ def fetch_batch_market_data(tickers, account_size=100000):
     return results
 
 
-# --- DATA ENGINE 2: ISOLATED SINGLE-TICKER ENGINE ---
+# --- DATA ENGINE 2: ISOLATED SINGLE-TICKER ENGINE (WITH 1-HOUR BOS PRECISION) ---
 @st.cache_data(ttl=300)
 def fetch_single_ticker_data(sym, account_size=100000):
     try:
         t = yf.Ticker(sym)
-        df = t.history(period="1y")
+        df = t.history(period="1y", interval="1d")
         if df.empty or len(df) < 20:
             return None
+        try:
+            df_1h = t.history(period="1mo", interval="1h")
+        except Exception:
+            df_1h = None
 
         close = float(df["Close"].iloc[-1])
         prev_close = float(df["Close"].iloc[-2]) if len(df) >= 2 else close
@@ -898,7 +981,7 @@ def fetch_single_ticker_data(sym, account_size=100000):
         fund_score = 80
         composite = int((fund_score * w_fund) + (tech_score * w_tech) + (mom_score * w_mom))
 
-        tct_info = analyze_tct_strategy(df, account_size=account_size)
+        tct_info = analyze_dual_playbook(df, account_size=account_size, df_1h=df_1h)
 
         rec = {
             "Ticker": sym, "Price": close, "Change": change, "Change_Pct": change_pct,
@@ -993,7 +1076,6 @@ def fetch_macro_and_regime():
                 pct = (chg / pc) * 100 if pc != 0 else 0.0
                 out[name] = (c, chg, pct)
 
-        # Evaluate S&P 500 EMA20/EMA50 + VIX for Market Regime Traffic Light
         if "^GSPC" in df.columns.levels[0]:
             sp = df["^GSPC"].dropna(subset=["Close"])
             if len(sp) >= 50:
@@ -1025,13 +1107,21 @@ def fetch_macro_and_regime():
 # 1. PRIMARY SIDEBAR NAVIGATION
 # ==============================================================================
 st.sidebar.markdown(
-    """<div style="padding: 10px 0 20px 0;"><span style="display: inline-block; width: 9px; height: 9px; background: #22c55e; border-radius: 50%; margin-right: 6px;"></span><span style="font-size: 0.85rem; font-weight: 600; letter-spacing: 0.05em; color: #a1a1aa;">MARKET OPEN · 15M DELAY</span><h2 style="color: #f4efe6 !important; margin: 6px 0 0 0; font-size: 1.4rem;">Ledger</h2><span style="font-size: 0.75rem; color: #c5a059; text-transform: uppercase; letter-spacing: 0.1em; font-weight: 600;">Momentum & TCT v8.0</span></div>""", 
+    """<div style="padding: 10px 0 20px 0;"><span style="display: inline-block; width: 9px; height: 9px; background: #22c55e; border-radius: 50%; margin-right: 6px;"></span><span style="font-size: 0.85rem; font-weight: 600; letter-spacing: 0.05em; color: #a1a1aa;">LIVE + 15M RESEARCH</span><h2 style="color: #f4efe6 !important; margin: 6px 0 0 0; font-size: 1.4rem;">Ledger</h2><span style="font-size: 0.75rem; color: #c5a059; text-transform: uppercase; letter-spacing: 0.1em; font-weight: 600;">Momentum & TCT v9.0</span></div>""", 
     unsafe_allow_html=True
 )
 
 navigation = st.sidebar.radio(
     "Navigation",
-    ["Dashboard", "Screener", "Watchlist", "Precious Metals, Crypto & Currency", "News & Earnings", "Settings"],
+    [
+        "Dashboard",
+        "⚡ Live Real-Time Quotes",
+        "Screener",
+        "Watchlist",
+        "Precious Metals, Crypto & Currency",
+        "News & Earnings",
+        "Settings"
+    ],
     label_visibility="collapsed",
     on_change=clear_inspection
 )
@@ -1099,17 +1189,17 @@ if st.session_state.inspect_symbol is not None:
         c_ctrl, c_plot = st.columns([1.15, 3.85])
         with c_ctrl:
             st.markdown("### Chart Overlays")
-            show_tct_lines = st.checkbox("TCT Target / Buy / Stop Lines", value=True)
+            show_tct_lines = st.checkbox("Target / Buy / Stop Lines", value=True)
             show_ema20 = st.checkbox("EMA 20 (Gold)", value=True)
             show_ema50 = st.checkbox("EMA 50 (Green)", value=True)
             show_ema200 = st.checkbox("EMA 200 (Purple)", value=False)
             show_bb = st.checkbox("Bollinger Bands (20, 2)", value=False)
 
             st.markdown("---")
-            st.markdown("### TCT Trade Ticket")
+            st.markdown("### Action Trade Ticket")
+            st.markdown(f"**Playbook:** `{d['TCT_Model']}`")
             st.markdown(f"**Action:** `{d['TCT_Action']}`")
-            st.markdown(f"**Setup Mode:** `{d['TCT_Model']}`")
-            st.markdown(f"**Buy Above (BOS):** `${d['BOS_Level']:,.2f}`")
+            st.markdown(f"**Buy Trigger:** `${d['BOS_Level']:,.2f}`")
             st.markdown(f"**Profit Target:** `${d['Target_Price']:,.2f}` (+{d['Target_Pct']:.1f}%)")
             st.markdown(f"**Stop-Loss:** `${d['Stop_Price']:,.2f}` ({d['Stop_Pct']:.1f}%)")
             st.markdown(f"**Reward/Risk:** `{d['R_Multiple']:.2f}R` ({'Pass ≥2R' if d['TCT_2R_Pass'] else 'Below 2R'})")
@@ -1136,9 +1226,9 @@ if st.session_state.inspect_symbol is not None:
                 fig.add_trace(go.Scatter(x=df_hist.index, y=df_hist['BB_Lower'], line=dict(color="#94a3b8", width=1, dash="dot"), name="BB Lower"), row=1, col=1)
 
             if show_tct_lines:
-                fig.add_hline(y=d["Target_Price"], line_dash="dash", line_color="#15803d", line_width=1.8, annotation_text=f"TAKE PROFIT TARGET: ${d['Target_Price']:,.2f}", annotation_position="top left", row=1, col=1)
-                fig.add_hline(y=d["BOS_Level"], line_dash="dot", line_color="#2563eb", line_width=1.6, annotation_text=f"BUY TRIGGER (BOS): ${d['BOS_Level']:,.2f}", annotation_position="bottom left", row=1, col=1)
-                fig.add_hline(y=d["Stop_Price"], line_dash="dash", line_color="#b91c1c", line_width=1.8, annotation_text=f"STOP-LOSS (EXIT): ${d['Stop_Price']:,.2f}", annotation_position="bottom right", row=1, col=1)
+                fig.add_hline(y=d["Target_Price"], line_dash="dash", line_color="#15803d", line_width=1.8, annotation_text=f"TAKE PROFIT TARGET: ${d['Target_Price']:,.2f} (+{d['Target_Pct']:.1f}%)", annotation_position="top left", row=1, col=1)
+                fig.add_hline(y=d["BOS_Level"], line_dash="dot", line_color="#2563eb", line_width=1.6, annotation_text=f"BUY TRIGGER: ${d['BOS_Level']:,.2f}", annotation_position="bottom left", row=1, col=1)
+                fig.add_hline(y=d["Stop_Price"], line_dash="dash", line_color="#b91c1c", line_width=1.8, annotation_text=f"STOP-LOSS (EXIT): ${d['Stop_Price']:,.2f} ({d['Stop_Pct']:.1f}%)", annotation_position="bottom right", row=1, col=1)
 
             vol_colors = ['#15803d' if c >= o else '#b91c1c' for c, o in zip(df_hist['Close'], df_hist['Open'])]
             fig.add_trace(go.Bar(x=df_hist.index, y=df_hist['Volume'], marker_color=vol_colors, name="Volume"), row=2, col=1)
@@ -1166,7 +1256,7 @@ if st.session_state.inspect_symbol is not None:
 else:
     if navigation == "Dashboard":
         st.markdown("<h1>Market Cockpit</h1>", unsafe_allow_html=True)
-        st.markdown("<p style='color: #52525b; margin-top: -12px;'>Tap any stock symbol to open its interactive chart & TCT Trade Ticket.</p>", unsafe_allow_html=True)
+        st.markdown("<p style='color: #52525b; margin-top: -12px;'>Tap any stock symbol to open its interactive chart & Dual-Playbook Trade Ticket.</p>", unsafe_allow_html=True)
 
         all_monitored = list(dict.fromkeys(watchlists.get("Active Portfolio", []) + watchlists.get("Opportunity Radar", [])))
         stock_records = fetch_batch_market_data(all_monitored, account_size=settings["account_size"])
@@ -1177,7 +1267,7 @@ else:
                 f"""
                 <div style="background-color: #0f291e; border-radius: 10px; padding: 20px 24px; color: #fbf9f4; margin-bottom: 20px;">
                     <div style="font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.12em; color: #c5a059; font-weight: 700;">
-                        TODAY'S STANDOUT SETUP · {best_pick['TCT_Action']} · TAP SYMBOL TO INSPECT
+                        TODAY'S STANDOUT SETUP · {best_pick['TCT_Action']} · {best_pick['TCT_Model']}
                     </div>
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 6px;">
                         <div>
@@ -1187,7 +1277,7 @@ else:
                                 {'+' if best_pick['Change'] >= 0 else ''}{best_pick['Change_Pct']:.2f}%
                             </span>
                             <div style="color: #cbd5e1; font-size: 0.90rem; margin-top: 6px;">
-                                <b>Buy/BOS:</b> ${best_pick['BOS_Level']:,.2f} · <b>Take Profit:</b> ${best_pick['Target_Price']:,.2f} (+{best_pick['Target_Pct']:.1f}%) · <b>Stop-Loss:</b> ${best_pick['Stop_Price']:,.2f} · <b>Size (0.5% Risk):</b> {best_pick['Shares_05Pct']} shs ({best_pick['R_Multiple']:.1f}R)
+                                <b>Buy Trigger:</b> ${best_pick['BOS_Level']:,.2f} · <b>Take Profit:</b> ${best_pick['Target_Price']:,.2f} (+{best_pick['Target_Pct']:.1f}%) · <b>Stop-Loss:</b> ${best_pick['Stop_Price']:,.2f} ({best_pick['Stop_Pct']:.1f}%) · <b>Size (0.5% Risk):</b> {best_pick['Shares_05Pct']} shs ({best_pick['R_Multiple']:.1f}R)
                             </div>
                         </div>
                         <div style="text-align: right;">
@@ -1262,88 +1352,244 @@ else:
                             </div>
                         </div>
                         <div style="font-size: 0.74rem; color: #52525b; margin-top: 5px;">
-                            Buy: <b>${r['BOS_Level']:,.2f}</b> · Target: <b style="color:#15803d;">${r['Target_Price']:,.2f}</b> · Stop: <b style="color:#b91c1c;">${r['Stop_Price']:,.2f}</b> ({r['R_Multiple']:.1f}R)
+                            Buy: <b>${r['BOS_Level']:,.2f}</b> · Target: <b style="color:#15803d;">${r['Target_Price']:,.2f}</b> (+{r['Target_Pct']:.1f}%) · Stop: <b style="color:#b91c1c;">${r['Stop_Price']:,.2f}</b> ({r['R_Multiple']:.1f}R)
                         </div>
                     </div>
                     """, unsafe_allow_html=True
                 )
 
+    elif navigation == "⚡ Live Real-Time Quotes":
+        st.markdown("<h1>⚡ Live Real-Time Quote Board</h1>", unsafe_allow_html=True)
+        st.markdown("<p style='color: #52525b; margin-top: -12px;'>Real-time streaming market quotes and interactive charts powered by TradingView (no login or account needed).</p>", unsafe_allow_html=True)
+
+        all_monitored = list(dict.fromkeys(watchlists.get("Active Portfolio", []) + watchlists.get("Opportunity Radar", [])))
+
+        # 1. Live Streaming Ticker Tape at the top
+        tape_symbols = [{"proName": "FOREXCOM:SPXUSD", "title": "S&P 500"}, {"proName": "FOREXCOM:NSXUSD", "title": "Nasdaq 100"}, {"proName": "BITSTAMP:BTCUSD", "title": "Bitcoin"}]
+        for sym in all_monitored[:15]:
+            tape_symbols.append({"proName": sym, "title": sym})
+        tape_json = json.dumps(tape_symbols)
+
+        components.html(f"""
+        <div class="tradingview-widget-container">
+          <div class="tradingview-widget-container__widget"></div>
+          <script type="text/javascript" src="https://s3.tradingview.com/external-embedding/embed-widget-ticker-tape.js" async>
+          {{
+            "symbols": {tape_json},
+            "showSymbolLogo": true,
+            "isTransparent": false,
+            "displayMode": "adaptive",
+            "colorTheme": "light",
+            "locale": "en"
+          }}
+          </script>
+        </div>
+        """, height=75)
+
+        # 2. Interactive Live Chart + Real-Time Watchlist Multi-Quote Table
+        col_rt_left, col_rt_right = st.columns([1.65, 1.35])
+
+        with col_rt_left:
+            st.subheader("Live Real-Time Chart & Intraday Candles")
+            c_sel1, c_sel2 = st.columns([2, 1])
+            with c_sel1:
+                selected_rt_sym = st.selectbox("Select Watchlist Stock for Live Streaming Chart", all_monitored if all_monitored else ["NVDA", "PLTR", "COIN"])
+            with c_sel2:
+                rt_interval = st.selectbox("Chart Timeframe", ["15", "60", "240", "D"], format_func=lambda x: {"15": "15-Minute", "60": "1-Hour (BOS)", "240": "4-Hour", "D": "Daily"}[x], index=1)
+
+            components.html(f"""
+            <div class="tradingview-widget-container" style="height:540px;width:100%;">
+              <div id="tradingview_rt_chart" style="height:520px;width:100%;"></div>
+              <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
+              <script type="text/javascript">
+              new TradingView.widget({{
+                "autosize": true,
+                "symbol": "{selected_rt_sym}",
+                "interval": "{rt_interval}",
+                "timezone": "America/New_York",
+                "theme": "light",
+                "style": "1",
+                "locale": "en",
+                "enable_publishing": false,
+                "hide_top_toolbar": false,
+                "save_image": false,
+                "studies": ["EMA@tv-basicstudies", "RSI@tv-basicstudies"],
+                "container_id": "tradingview_rt_chart"
+              }});
+              </script>
+            </div>
+            """, height=545)
+
+        with col_rt_right:
+            st.subheader("Live Streaming Watchlist Board")
+            active_syms = [
+                {"name": s, "displayName": s}
+                for s in watchlists.get("Active Portfolio", [])[:28]
+            ]
+            radar_syms = [
+                {"name": s, "displayName": s}
+                for s in watchlists.get("Opportunity Radar", [])[:20]
+            ]
+            groups_payload = [
+                {"name": "Active Portfolio", "originalName": "Indices", "symbols": active_syms},
+                {"name": "Opportunity Radar", "originalName": "Futures", "symbols": radar_syms}
+            ]
+            groups_json = json.dumps(groups_payload)
+
+            components.html(f"""
+            <div class="tradingview-widget-container">
+              <div class="tradingview-widget-container__widget"></div>
+              <script type="text/javascript" src="https://s3.tradingview.com/external-embedding/embed-widget-market-quotes.js" async>
+              {{
+                "width": "100%",
+                "height": 540,
+                "symbolsGroups": {groups_json},
+                "showSymbolLogo": true,
+                "isTransparent": false,
+                "colorTheme": "light",
+                "locale": "en"
+              }}
+              </script>
+            </div>
+            """, height=550)
+
     elif navigation == "Screener":
         st.markdown("<h1>Find the Next Quality Leader or TCT Setup</h1>", unsafe_allow_html=True)
-        st.markdown("<p style='color: #52525b; margin-top: -12px;'>Tap any matching stock symbol to open its full chart and trade ticket.</p>", unsafe_allow_html=True)
+        st.markdown("<p style='color: #52525b; margin-top: -12px;'>Use the One-Tap Strategy Presets below or build a custom scan across ~220 liquid US stocks.</p>", unsafe_allow_html=True)
 
-        f_col1, f_col2, f_col3 = st.columns([1.2, 1.4, 1.4])
+        all_watchlist_syms = list(dict.fromkeys(watchlists.get("Active Portfolio", []) + watchlists.get("Opportunity Radar", [])))
+        full_market_syms = []
+        for s_list in GICS_SECTORS.values():
+            full_market_syms.extend(s_list)
+        full_market_syms = list(dict.fromkeys(full_market_syms + all_watchlist_syms))
 
-        with f_col1:
-            st.markdown("**1. GICS Sectors (Pick Any)**")
-            selected_sectors = []
-            for sec in list(GICS_SECTORS.keys()):
-                if st.checkbox(sec, value=False, key=f"sec_{sec}"):
-                    selected_sectors.append(sec)
+        u_col1, u_col2 = st.columns([2.2, 1.8])
+        with u_col1:
+            universe_mode = st.radio(
+                "1. Choose Scan Universe",
+                [
+                    f"Expanded Liquid Market (~{len(full_market_syms)} Top US Stocks)",
+                    f"My Watchlist Only ({len(all_watchlist_syms)} Stocks — Instant)",
+                    "Custom Sector Selection below"
+                ],
+                horizontal=False
+            )
+        with u_col2:
+            st.markdown("**Quick Universe Stats**")
+            st.caption(
+                "• **Expanded Market:** Covers S&P 500 & Nasdaq leaders, AI, Semis, Quantum, Space, Nuclear, Crypto/Fintech, Biotech & Industrials.\n"
+                "• **Dual-Playbook Engine:** Automatically separates TCT Bottoms from Momentum Trend Swings."
+            )
 
-        with f_col2:
-            st.markdown("**2. Momentum & Relative Strength**")
-            s_rs = st.checkbox("🔥 Outperforming S&P 500 (RS Leader)", value=False)
-            s1 = st.checkbox("RSI Rising Above 60 (Momentum)", value=False)
-            s2 = st.checkbox("MACD Line Above Zero", value=False)
-            s3 = st.checkbox("MACD Bullish Crossover", value=False)
-            s4 = st.checkbox("20-Day High Breakout (Volume Confirmed)", value=False)
-            s5 = st.checkbox("Bollinger Upper Band Breakout", value=False)
-            s6 = st.checkbox("Bollinger Lower Band Touch (Pullback)", value=False)
-            s7 = st.checkbox("Pullback Near 50-day EMA (Support)", value=False)
-            s8 = st.checkbox("Price Above 200-day EMA", value=False)
-            s9 = st.checkbox("Within 10% of 52-Week High", value=False)
+        st.markdown("### 2. One-Tap Strategy Preset Scans")
+        p_col1, p_col2, p_col3, p_col4 = st.columns(4)
 
-        with f_col3:
-            st.markdown("**3. TCT Accumulation Strategy Filters**")
-            tct1 = st.checkbox("🟢 TCT 'BUY NOW' (BOS Breakout Triggered)", value=False)
-            tct2 = st.checkbox("🟡 TCT Valid Accumulation Box (Tap 1 & Tap 2)", value=False)
-            tct3 = st.checkbox("TCT Slow Decline (≥ 25 Bars from Peak)", value=False)
-            tct4 = st.checkbox("TCT Reward-to-Risk ≥ 2.0R to Target", value=False)
-            tct5 = st.checkbox("TCT Liquidity (20D Dollar Volume ≥ $50M)", value=False)
+        def get_target_universe(selected_secs):
+            if universe_mode.startswith("My Watchlist"):
+                return all_watchlist_syms
+            elif universe_mode.startswith("Expanded Liquid"):
+                return full_market_syms
+            else:
+                out = []
+                for sc in selected_secs:
+                    out.extend(GICS_SECTORS[sc])
+                return list(dict.fromkeys(out))
 
-        scan_universe = []
-        for s in selected_sectors:
-            scan_universe.extend(GICS_SECTORS[s])
-        scan_universe = list(set(scan_universe))
+        with st.expander("Optional: Custom Sector & Technical Filter Builder", expanded=False):
+            f_col1, f_col2, f_col3 = st.columns([1.2, 1.4, 1.4])
+            with f_col1:
+                st.markdown("**GICS & Theme Sectors**")
+                selected_sectors = []
+                for sec in list(GICS_SECTORS.keys()):
+                    if st.checkbox(sec, value=True, key=f"sec_{sec}"):
+                        selected_sectors.append(sec)
+            with f_col2:
+                st.markdown("**Momentum & Relative Strength**")
+                s_rs = st.checkbox("🔥 Outperforming S&P 500 (RS Leader)", value=False)
+                s1 = st.checkbox("RSI Rising Above 55 (Momentum)", value=False)
+                s2 = st.checkbox("MACD Line Above Zero", value=False)
+                s3 = st.checkbox("MACD Bullish Crossover", value=False)
+                s4 = st.checkbox("20-Day High Breakout (Volume Confirmed)", value=False)
+                s7 = st.checkbox("Pullback Near 20D or 50D EMA Support", value=False)
+                s8 = st.checkbox("Price Above 200-day EMA", value=False)
+            with f_col3:
+                st.markdown("**TCT & Risk Filters**")
+                tct1 = st.checkbox("🟢 Action = 'BUY NOW' (TCT or Momentum)", value=False)
+                tct2 = st.checkbox("📐 True TCT Bottom Accumulation Box Only", value=False)
+                tct4 = st.checkbox("Reward-to-Risk ≥ 2.0R to Target", value=False)
+                tct5 = st.checkbox("Liquidity (20D Dollar Volume ≥ $50M)", value=False)
 
-        c_run, c_clear = st.columns([2, 10])
-        with c_run:
-            if st.button("Run Scan", type="primary"):
-                if not scan_universe:
-                    st.warning("Please check at least one GICS Sector above to run the scan.")
-                else:
-                    with st.spinner(f"Scanning {len(scan_universe)} liquid names across selected sectors..."):
-                        screener_data = fetch_batch_market_data(scan_universe, account_size=settings["account_size"])
-                        matches = []
-                        for t, d in screener_data.items():
-                            if s_rs and not d["RS_Leader"]: continue
-                            if s1 and d["RSI"] < 60: continue
-                            if s2 and not d["MACD_Above_Zero"]: continue
-                            if s3 and not d["MACD_Cross"]: continue
-                            if s4 and not d["Is_Breakout"]: continue
-                            if s5 and not d["BB_Upper_Break"]: continue
-                            if s6 and not d["BB_Lower_Touch"]: continue
-                            if s7 and not d["Pullback_EMA50"]: continue
-                            if s8 and not d["Above_EMA200"]: continue
-                            if s9 and not d["Within_52W"]: continue
-                            if tct1 and d["TCT_Action"] != "BUY NOW (BOS TRIGGERED)": continue
-                            if tct2 and not d["TCT_Valid_Range"]: continue
-                            if tct3 and not d["TCT_Slow_25"]: continue
-                            if tct4 and not d["TCT_2R_Pass"]: continue
-                            if tct5 and not d["TCT_Liq_50M"]: continue
-                            matches.append(d)
-                        st.session_state.screener_matches = sorted(matches, key=lambda x: (x["TCT_Priority"], -x["Score"]))
+            if st.button("Run Custom Filter Scan", type="primary"):
+                scan_univ = get_target_universe(selected_sectors)
+                with st.spinner(f"Scanning {len(scan_univ)} stocks with custom filters..."):
+                    s_data = fetch_batch_market_data(scan_univ, account_size=settings["account_size"])
+                    matches = []
+                    for t, d in s_data.items():
+                        if s_rs and not d["RS_Leader"]: continue
+                        if s1 and d["RSI"] < 55: continue
+                        if s2 and not d["MACD_Above_Zero"]: continue
+                        if s3 and not d["MACD_Cross"]: continue
+                        if s4 and not d["Is_Breakout"]: continue
+                        if s7 and not d["Pullback_EMA50"]: continue
+                        if s8 and not d["Above_EMA200"]: continue
+                        if tct1 and d["TCT_Priority"] != 0: continue
+                        if tct2 and not d["TCT_Valid_Range"]: continue
+                        if tct4 and not d["TCT_2R_Pass"]: continue
+                        if tct5 and not d["TCT_Liq_50M"]: continue
+                        matches.append(d)
+                    st.session_state.screener_matches = sorted(matches, key=lambda x: (x["TCT_Priority"], -x["Score"]))
+                    st.session_state.screener_title = f"Custom Filter Scan ({len(matches)} Matches)"
 
-        with c_clear:
-            if st.session_state.screener_matches is not None:
+        # ONE-TAP PRESET HANDLERS
+        with p_col1:
+            if st.button("🟢 Preset 1: 'BUY NOW' Triggers", use_container_width=True, type="primary"):
+                scan_univ = get_target_universe(list(GICS_SECTORS.keys()))
+                with st.spinner(f"Scanning {len(scan_univ)} stocks for immediate BUY NOW triggers..."):
+                    s_data = fetch_batch_market_data(scan_univ, account_size=settings["account_size"])
+                    matches = [d for d in s_data.values() if d["TCT_Priority"] == 0 and d["TCT_2R_Pass"]]
+                    st.session_state.screener_matches = sorted(matches, key=lambda x: (-int(x["TCT_Valid_Range"]), -x["Score"]))
+                    st.session_state.screener_title = f"🟢 Preset 1: Immediate 'BUY NOW' Triggers ({len(matches)} Found)"
+
+        with p_col2:
+            if st.button("🚀 Preset 2: RS Momentum Leaders", use_container_width=True):
+                scan_univ = get_target_universe(list(GICS_SECTORS.keys()))
+                with st.spinner(f"Scanning {len(scan_univ)} stocks for S&P-beating Momentum Leaders..."):
+                    s_data = fetch_batch_market_data(scan_univ, account_size=settings["account_size"])
+                    matches = [d for d in s_data.values() if d["RS_Leader"] and d["Above_EMA50"] and (d["Is_Breakout"] or d["Score"] >= 75)]
+                    st.session_state.screener_matches = sorted(matches, key=lambda x: (-x["Score"], -x["RS_Diff"]))
+                    st.session_state.screener_title = f"🚀 Preset 2: Outperforming Momentum Leaders ({len(matches)} Found)"
+
+        with p_col3:
+            if st.button("🎯 Preset 3: Buy the Dip (Uptrend)", use_container_width=True):
+                scan_univ = get_target_universe(list(GICS_SECTORS.keys()))
+                with st.spinner(f"Scanning {len(scan_univ)} stocks for Uptrend Pullbacks near EMA support..."):
+                    s_data = fetch_batch_market_data(scan_univ, account_size=settings["account_size"])
+                    matches = [d for d in s_data.values() if d["Above_EMA50"] and d["Above_EMA200"] and d["Pullback_EMA50"] and 40 <= d["RSI"] <= 62]
+                    st.session_state.screener_matches = sorted(matches, key=lambda x: (-int(x["RS_Leader"]), -x["Score"]))
+                    st.session_state.screener_title = f"🎯 Preset 3: 'Buy the Dip' Near 20D/50D EMA Support ({len(matches)} Found)"
+
+        with p_col4:
+            if st.button("📐 Preset 4: True TCT Bottom Boxes", use_container_width=True):
+                scan_univ = get_target_universe(list(GICS_SECTORS.keys()))
+                with st.spinner(f"Scanning {len(scan_univ)} stocks for 25+ Bar TCT Accumulation Boxes..."):
+                    s_data = fetch_batch_market_data(scan_univ, account_size=settings["account_size"])
+                    matches = [d for d in s_data.values() if d["TCT_Valid_Range"]]
+                    st.session_state.screener_matches = sorted(matches, key=lambda x: (x["TCT_Priority"], -x["R_Multiple"]))
+                    st.session_state.screener_title = f"📐 Preset 4: Valid 25+ Bar TCT Bottom Accumulation Boxes ({len(matches)} Found)"
+
+        if st.session_state.screener_matches is not None:
+            st.markdown("---")
+            c_hdr, c_clr = st.columns([8, 2])
+            with c_hdr:
+                st.markdown(f"### {st.session_state.screener_title or 'Scan Results'}")
+            with c_clr:
                 if st.button("Clear Results"):
                     st.session_state.screener_matches = None
                     st.rerun()
 
-        if st.session_state.screener_matches is not None:
             matches = st.session_state.screener_matches
-            st.markdown(f"### Results: {len(matches)} Matches Found")
+            if not matches:
+                st.info("No stocks matched that exact preset right now. Try switching the Scan Universe above to 'Expanded Liquid Market' or try another preset.")
             for m in matches:
                 c1, c2, c3, c4 = st.columns([3.4, 2.7, 1.8, 1.0])
                 rs_badge = f'<span class="badge badge-rs-lead" style="margin-left:6px;">🔥 RS +{m["RS_Diff"]:.1f}%</span>' if m["RS_Leader"] else f'<span class="badge badge-rs-lag" style="margin-left:6px;">RS {m["RS_Diff"]:.1f}%</span>'
@@ -1354,7 +1600,7 @@ else:
                             <a href="?inspect={m['Ticker']}" target="_self" class="ticker-link">📊 {m['Ticker']}</a>
                             <span class="badge {m['TCT_Badge']}" style="margin-left: 8px;">{m['TCT_Action']}</span>{rs_badge}
                         </div>
-                        <div style="font-size: 0.85rem; color: #71717a; margin-top: 3px;">${m['Price']:,.2f} · <span style="color: {'#15803d' if m['Change']>=0 else '#b91c1c'}; font-weight: 600;">{'+' if m['Change']>=0 else ''}{m['Change_Pct']:.2f}%</span></div>
+                        <div style="font-size: 0.85rem; color: #71717a; margin-top: 3px;">${m['Price']:,.2f} · <span style="color: {'#15803d' if m['Change']>=0 else '#b91c1c'}; font-weight: 600;">{'+' if m['Change']>=0 else ''}{m['Change_Pct']:.2f}%</span> · <b>{m['TCT_Model']}</b></div>
                         <div style="font-size: 0.8rem; color: #475569; margin-top: 4px;">{m['TCT_Explain']}</div>
                         """, unsafe_allow_html=True
                     )
@@ -1362,7 +1608,7 @@ else:
                     st.markdown(
                         f"""
                         <div style="font-size: 0.82rem; line-height: 1.5;">
-                            <b>Buy Trigger (BOS):</b> ${m['BOS_Level']:,.2f}<br>
+                            <b>Buy Trigger:</b> ${m['BOS_Level']:,.2f}<br>
                             <b>Take Profit:</b> <span style="color:#15803d; font-weight:600;">${m['Target_Price']:,.2f} (+{m['Target_Pct']:.1f}%)</span><br>
                             <b>Stop-Loss:</b> <span style="color:#b91c1c; font-weight:600;">${m['Stop_Price']:,.2f} ({m['Stop_Pct']:.1f}%)</span> · <b>{m['R_Multiple']:.1f}R</b> · <b>{m['Shares_05Pct']} shs</b>
                         </div>
@@ -1378,7 +1624,7 @@ else:
                             st.success("Synced!" if ok else "Added")
 
     elif navigation == "Watchlist":
-        st.markdown("<h1>Watchlist & TCT Action Tickets</h1>", unsafe_allow_html=True)
+        st.markdown("<h1>Watchlist & Dual-Playbook Action Tickets</h1>", unsafe_allow_html=True)
         st.markdown("<p style='color: #52525b; margin-top: -12px;'>Tap any stock symbol to open its chart. Adding or removing tickers automatically syncs to your GitHub watchlists.json.</p>", unsafe_allow_html=True)
 
         folder = st.radio("Folder View", ["Active Portfolio", "Opportunity Radar"], horizontal=True)
@@ -1427,7 +1673,6 @@ else:
         data_dict = fetch_batch_market_data(symbols, account_size=settings["account_size"])
         earnings_map = fetch_upcoming_earnings_map(symbols)
 
-        # APPLY SORTING
         display_symbols = list(symbols)
         if sort_by == "Action Signal (Buy Now First)":
             display_symbols = sorted(display_symbols, key=lambda s: (data_dict.get(s, {}).get("TCT_Priority", 9), -data_dict.get(s, {}).get("Score", 0)))
@@ -1460,13 +1705,13 @@ else:
 
                 with target_c:
                     st.markdown(
-                        f'<div class="stock-card"><div style="display: flex; justify-content: space-between; align-items: flex-start;"><div><a href="?inspect={d["Ticker"]}" target="_self" class="ticker-link">📊 {d["Ticker"]}</a><span class="badge {d["TCT_Badge"]}" style="margin-left: 8px;">{d["TCT_Action"]}</span><span class="badge {d["Badge"]}" style="margin-left: 4px;">{d["State"]}</span>{rs_html}{earn_html}<div style="font-size: 1.35rem; font-weight: 700; margin-top: 6px;">${d["Price"]:,.2f} <span style="font-size: 0.9rem; color: {"#15803d" if d["Change"]>=0 else "#b91c1c"}; font-weight: 600;">{"+" if d["Change"]>=0 else ""}{d["Change_Pct"]:.2f}%</span></div></div><div style="text-align: right;"><div style="font-size: 1.6rem; font-weight: 700; color: #c5a059; font-family: \'Newsreader\', serif;">{d["Score"]}</div><div style="font-size: 0.7rem; color: #71717a; text-transform: uppercase;">Score</div></div></div><div class="trade-ticket"><div style="display: flex; justify-content: space-between; font-weight: 600; color: #0f291e; margin-bottom: 4px;"><span>🎯 Buy Trigger (BOS): ${d["BOS_Level"]:,.2f}</span><span>📐 Reward/Risk: {d["R_Multiple"]:.1f}R</span></div><div style="display: flex; justify-content: space-between;"><span>🟢 <b>Take Profit:</b> <span style="color:#15803d; font-weight:700;">${d["Target_Price"]:,.2f}</span> (+{d["Target_Pct"]:.1f}%)</span><span>🔴 <b>Stop-Loss:</b> <span style="color:#b91c1c; font-weight:700;">${d["Stop_Price"]:,.2f}</span> ({d["Stop_Pct"]:.1f}%)</span></div><div style="margin-top: 4px; font-size: 0.76rem; color: #52525b; display: flex; justify-content: space-between;"><span><b>0.5% Risk Size:</b> Buy {d["Shares_05Pct"]} shares (${d["Pos_Value"]:,.0f})</span><span><b>Mode:</b> {d["TCT_Model"]}</span></div></div><div style="display: flex; justify-content: space-between; align-items: center; margin-top: 8px; font-size: 0.78rem; color: #52525b;"><div>RSI: <b>{d["RSI"]:.1f}</b></div><div>RVOL: <b>{d["RVOL"]:.1f}x</b></div><div>EMA 50: <b>${d["History"]["EMA50"].iloc[-1]:,.2f}</b></div><div>20D Vol: <b>${d["Dollar_Vol_M"]:.0f}M</b></div></div><div style="font-size: 0.80rem; color: #475569; margin-top: 6px; font-style: italic;">"{d["TCT_Explain"]}"</div></div>',
+                        f'<div class="stock-card"><div style="display: flex; justify-content: space-between; align-items: flex-start;"><div><a href="?inspect={d["Ticker"]}" target="_self" class="ticker-link">📊 {d["Ticker"]}</a><span class="badge {d["TCT_Badge"]}" style="margin-left: 8px;">{d["TCT_Action"]}</span><span class="badge {d["Badge"]}" style="margin-left: 4px;">{d["State"]}</span>{rs_html}{earn_html}<div style="font-size: 1.35rem; font-weight: 700; margin-top: 6px;">${d["Price"]:,.2f} <span style="font-size: 0.9rem; color: {"#15803d" if d["Change"]>=0 else "#b91c1c"}; font-weight: 600;">{"+" if d["Change"]>=0 else ""}{d["Change_Pct"]:.2f}%</span></div></div><div style="text-align: right;"><div style="font-size: 1.6rem; font-weight: 700; color: #c5a059; font-family: \'Newsreader\', serif;">{d["Score"]}</div><div style="font-size: 0.7rem; color: #71717a; text-transform: uppercase;">Score</div></div></div><div class="trade-ticket"><div style="display: flex; justify-content: space-between; font-weight: 600; color: #0f291e; margin-bottom: 4px;"><span>🎯 Buy Trigger: ${d["BOS_Level"]:,.2f}</span><span>📐 Reward/Risk: {d["R_Multiple"]:.1f}R</span></div><div style="display: flex; justify-content: space-between;"><span>🟢 <b>Take Profit:</b> <span style="color:#15803d; font-weight:700;">${d["Target_Price"]:,.2f}</span> (+{d["Target_Pct"]:.1f}%)</span><span>🔴 <b>Stop-Loss:</b> <span style="color:#b91c1c; font-weight:700;">${d["Stop_Price"]:,.2f}</span> ({d["Stop_Pct"]:.1f}%)</span></div><div style="margin-top: 4px; font-size: 0.76rem; color: #52525b; display: flex; justify-content: space-between;"><span><b>0.5% Risk Size:</b> Buy {d["Shares_05Pct"]} shares (${d["Pos_Value"]:,.0f})</span><span><b>{d["TCT_Model"]}</b></span></div></div><div style="display: flex; justify-content: space-between; align-items: center; margin-top: 8px; font-size: 0.78rem; color: #52525b;"><div>RSI: <b>{d["RSI"]:.1f}</b></div><div>RVOL: <b>{d["RVOL"]:.1f}x</b></div><div>EMA 50: <b>${d["History"]["EMA50"].iloc[-1]:,.2f}</b></div><div>20D Vol: <b>${d["Dollar_Vol_M"]:.0f}M</b></div></div><div style="font-size: 0.80rem; color: #475569; margin-top: 6px; font-style: italic;">"{d["TCT_Explain"]}"</div></div>',
                         unsafe_allow_html=True
                     )
 
     elif navigation == "Precious Metals, Crypto & Currency":
         st.markdown("<h1>Precious Metals, Crypto & Currency</h1>", unsafe_allow_html=True)
-        st.markdown("<p style='color: #52525b; margin-top: -12px;'>Live Precious & Industrial Metals, Cryptocurrencies, and Major FX with clickable charts, TCT Buy/Target/Stop levels, and dedicated news.</p>", unsafe_allow_html=True)
+        st.markdown("<p style='color: #52525b; margin-top: -12px;'>Live Precious & Industrial Metals, Cryptocurrencies, and Major FX with clickable charts, realistic Buy/Target/Stop levels, and dedicated news.</p>", unsafe_allow_html=True)
 
         METALS_GROUP = {
             "Gold Futures / Spot (USD/oz)": "GC=F",
@@ -1500,7 +1745,7 @@ else:
                     decimals = 4 if sym in ("EURUSD=X", "XRP-USD", "HG=F") else 2
                     with col:
                         st.markdown(
-                            f'<div class="stock-card"><div style="display:flex; justify-content:space-between; align-items:center;"><div style="font-size: 0.76rem; color: #71717a; text-transform: uppercase; font-weight: 700;">{title}</div><span class="badge {m["TCT_Badge"]}">{m["TCT_Action"]}</span></div><div style="display: flex; justify-content: space-between; align-items: baseline; margin-top: 6px;"><div><a href="?inspect={sym}" target="_self" class="ticker-link">📊 {sym}</a><span style="font-size: 1.45rem; font-weight: 700; color: #0f291e; margin-left: 10px;">${m["Price"]:,.{decimals}f}</span><span style="font-size: 0.92rem; color: {"#15803d" if m["Change"]>=0 else "#b91c1c"}; font-weight: 600; margin-left: 6px;">{"+" if m["Change"]>=0 else ""}{m["Change_Pct"]:.2f}%</span></div><span class="badge {m["Badge"]}">{m["State"]}</span></div><div class="trade-ticket"><div style="display:flex; justify-content:space-between;"><span>🎯 <b>Buy Trigger (BOS):</b> ${m["BOS_Level"]:,.{decimals}f}</span><span>📐 <b>Reward/Risk:</b> {m["R_Multiple"]:.1f}R</span></div><div style="display:flex; justify-content:space-between; margin-top:3px;"><span>🟢 <b>Target:</b> <b style="color:#15803d;">${m["Target_Price"]:,.{decimals}f}</b> (+{m["Target_Pct"]:.1f}%)</span><span>🔴 <b>Stop:</b> <b style="color:#b91c1c;">${m["Stop_Price"]:,.{decimals}f}</b> ({m["Stop_Pct"]:.1f}%)</span></div></div><div style="margin-top: 8px; font-size: 0.78rem; color: #52525b; display:flex; justify-content:space-between;"><span>RSI (14): <b>{m["RSI"]:.1f}</b></span><span>EMA 20: <b>${m["History"]["EMA20"].iloc[-1]:,.{decimals}f}</b></span><span>EMA 50: <b>${m["History"]["EMA50"].iloc[-1]:,.{decimals}f}</b></span></div></div>',
+                            f'<div class="stock-card"><div style="display:flex; justify-content:space-between; align-items:center;"><div style="font-size: 0.76rem; color: #71717a; text-transform: uppercase; font-weight: 700;">{title}</div><span class="badge {m["TCT_Badge"]}">{m["TCT_Action"]}</span></div><div style="display: flex; justify-content: space-between; align-items: baseline; margin-top: 6px;"><div><a href="?inspect={sym}" target="_self" class="ticker-link">📊 {sym}</a><span style="font-size: 1.45rem; font-weight: 700; color: #0f291e; margin-left: 10px;">${m["Price"]:,.{decimals}f}</span><span style="font-size: 0.92rem; color: {"#15803d" if m["Change"]>=0 else "#b91c1c"}; font-weight: 600; margin-left: 6px;">{"+" if m["Change"]>=0 else ""}{m["Change_Pct"]:.2f}%</span></div><span class="badge {m["Badge"]}">{m["State"]}</span></div><div class="trade-ticket"><div style="display:flex; justify-content:space-between;"><span>🎯 <b>Buy Trigger:</b> ${m["BOS_Level"]:,.{decimals}f}</span><span>📐 <b>Reward/Risk:</b> {m["R_Multiple"]:.1f}R</span></div><div style="display:flex; justify-content:space-between; margin-top:3px;"><span>🟢 <b>Target:</b> <b style="color:#15803d;">${m["Target_Price"]:,.{decimals}f}</b> (+{m["Target_Pct"]:.1f}%)</span><span>🔴 <b>Stop:</b> <b style="color:#b91c1c;">${m["Stop_Price"]:,.{decimals}f}</b> ({m["Stop_Pct"]:.1f}%)</span></div></div><div style="margin-top: 8px; font-size: 0.78rem; color: #52525b; display:flex; justify-content:space-between;"><span>RSI (14): <b>{m["RSI"]:.1f}</b></span><span>EMA 20: <b>${m["History"]["EMA20"].iloc[-1]:,.{decimals}f}</b></span><span>EMA 50: <b>${m["History"]["EMA50"].iloc[-1]:,.{decimals}f}</b></span></div></div>',
                             unsafe_allow_html=True
                         )
 
@@ -1615,15 +1860,20 @@ else:
 
             if st.button("🔔 Send Live Daily Briefing Ping to iPad Now", type="primary"):
                 buys = [f"{k} (Buy ${v['BOS_Level']:.2f} -> Target ${v['Target_Price']:.2f})" for k, v in current_data.items() if v["TCT_Priority"] == 0]
+                tct_boxes = [f"{k} (BOS ${v['BOS_Level']:.2f})" for k, v in current_data.items() if v["TCT_Valid_Range"] and v["TCT_Priority"] != 0]
                 breaks = [k for k, v in current_data.items() if v["State"] == "Confirmed Breakout" and v["TCT_Priority"] != 0]
-                sells = [f"{k} (Below ${v['Stop_Price']:.2f})" for k, v in current_data.items() if v["TCT_Priority"] == 4]
+                sells = [f"{k} (${v['Price']:.2f})" for k, v in current_data.items() if v["TCT_Priority"] == 4]
                 summary_msg = (
-                    f"🟢 TCT BUY NOW ({len(buys)}): {', '.join(buys[:6]) if buys else 'None'}\n"
+                    f"🟢 BUY NOW ({len(buys)}): {', '.join(buys[:6]) if buys else 'None'}\n"
+                    f"📐 In TCT Bottom Box ({len(tct_boxes)}): {', '.join(tct_boxes[:6]) if tct_boxes else 'None'}\n"
                     f"🚀 Momentum Breakouts ({len(breaks)}): {', '.join(breaks[:8]) if breaks else 'None'}\n"
-                    f"🔴 SELL / Stop-Loss ({len(sells)}): {', '.join(sells[:8]) if sells else 'None'}"
+                    f"🔴 Below 50 EMA / Avoid ({len(sells)}): {', '.join(sells[:8]) if sells else 'None'}"
                 )
-                send_ntfy_alert(summary_msg, "📊 Daily Portfolio Briefing")
-                st.success("Live Daily Briefing sent to your iPad via ntfy!")
+                ok, status_msg = send_ntfy_alert(summary_msg, "Daily Portfolio Briefing")
+                if ok:
+                    st.success(f"✅ {status_msg}")
+                else:
+                    st.error(f"❌ {status_msg}")
 
             st.markdown("---")
             st.subheader("Export Strategy Review CSV")
@@ -1635,8 +1885,9 @@ else:
                         "Ticker": sym_name,
                         "Price": d["Price"],
                         "Change_Pct": d["Change_Pct"],
-                        "TCT_Action": d["TCT_Action"],
-                        "Buy_BOS_Trigger": d["BOS_Level"],
+                        "Playbook": d["TCT_Model"],
+                        "Action_Signal": d["TCT_Action"],
+                        "Buy_Trigger": d["BOS_Level"],
                         "Take_Profit_Target": d["Target_Price"],
                         "Stop_Loss": d["Stop_Price"],
                         "Reward_Risk_R": round(d["R_Multiple"], 2),
