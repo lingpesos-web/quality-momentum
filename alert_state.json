@@ -24,6 +24,7 @@
     "SPCX_STOP",
     "STX_STOP",
     "TEM_STOP",
+    "VRT_STOP",
     "WDC_STOP"
   ]
 }
