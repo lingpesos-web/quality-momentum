@@ -2,24 +2,38 @@ name: Market Alerts
 
 on:
   schedule:
-    # Runs at 20:15 UTC (4:15 PM US Eastern Time) Monday-Friday
-    - cron: '15 20 * * 1-5'
-  workflow_dispatch: # Allows you to manually click a button to test it
+    # Runs every 30 minutes from 13:30 to 20:30 UTC (9:30 AM to 4:30 PM US Eastern) Mon-Fri
+    - cron: '30 13 * * 1-5'
+    - cron: '0,30 14-20 * * 1-5'
+  workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   check-market:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Setup Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
+          python-version: '3.11'
 
       - name: Install Libraries
         run: pip install yfinance pandas numpy
 
-      - name: Run Alert Engine
+      - name: Run Live & Close Alert Engine
+        env:
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
         run: python check_alerts.py
+
+      - name: Save Anti-Spam Alert State
+        run: |
+          git config --local user.email "actions@github.com"
+          git config --local user.name "GitHub Action Bot"
+          git add alert_state.json || true
+          git diff --staged --quiet || git commit -m "Update intraday alert memory [skip ci]"
+          git push || true
