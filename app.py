@@ -7,6 +7,7 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import json
 import os
+import time
 import base64
 import urllib.request
 import urllib.parse
@@ -905,9 +906,9 @@ def analyze_dual_playbook(df, account_size=100000, spy_ret_63d=0.0, df_1h=None):
     }
 
 
-# --- DATA ENGINE 1: BATCH INGESTION (INCLUDES DAY HIGH & DAY LOW) ---
+# --- DATA ENGINE 1: BATCH INGESTION (INCLUDES DAY HIGH, DAY LOW & AUTO-REFRESH BUCKET) ---
 @st.cache_data(ttl=120)
-def fetch_batch_market_data(tickers, account_size=100000):
+def fetch_batch_market_data(tickers, account_size=100000, refresh_bucket=0):
     if not tickers:
         return {}
     results = {}
@@ -1277,7 +1278,7 @@ def fetch_macro_and_regime():
 # 1. PRIMARY SIDEBAR NAVIGATION
 # ==============================================================================
 st.sidebar.markdown(
-    """<div style="padding: 10px 0 20px 0;"><span style="display: inline-block; width: 9px; height: 9px; background: #22c55e; border-radius: 50%; margin-right: 6px;"></span><span style="font-size: 0.85rem; font-weight: 600; letter-spacing: 0.05em; color: #a1a1aa;">LIVE + 15M RESEARCH</span><h2 style="color: #f4efe6 !important; margin: 6px 0 0 0; font-size: 1.4rem;">Ledger</h2><span style="font-size: 0.75rem; color: #c5a059; text-transform: uppercase; letter-spacing: 0.1em; font-weight: 600;">Momentum & TCT v10.1</span></div>""", 
+    """<div style="padding: 10px 0 20px 0;"><span style="display: inline-block; width: 9px; height: 9px; background: #22c55e; border-radius: 50%; margin-right: 6px;"></span><span style="font-size: 0.85rem; font-weight: 600; letter-spacing: 0.05em; color: #a1a1aa;">LIVE + 15M RESEARCH</span><h2 style="color: #f4efe6 !important; margin: 6px 0 0 0; font-size: 1.4rem;">Ledger</h2><span style="font-size: 0.75rem; color: #c5a059; text-transform: uppercase; letter-spacing: 0.1em; font-weight: 600;">Momentum & TCT v10.3</span></div>""", 
     unsafe_allow_html=True
 )
 
@@ -1546,11 +1547,21 @@ else:
         folder_names = list(watchlists.keys())
         folder_options = folder_names + ["All Watchlists Combined"]
 
-        # Slim Single-Row Control Bar at the top
-        ctrl1, ctrl2, ctrl3, ctrl4, ctrl5 = st.columns([2.1, 2.2, 1.8, 0.9, 1.3])
+        # Slim Single-Row Control Bar at the top (Added Mode Switcher & Auto-Refresh Timer)
+        ctrl1, ctrl2, ctrl3, ctrl4, ctrl5, ctrl6, ctrl7 = st.columns([1.8, 1.9, 1.9, 1.3, 1.3, 0.8, 1.1])
         with ctrl1:
             selected_live_folder = st.selectbox("Watchlist", folder_options, index=0, label_visibility="collapsed")
         with ctrl2:
+            live_board_mode = st.selectbox(
+                "Board Mode",
+                [
+                    "📊 Custom Signal Board (Large Font)",
+                    "⚡ TradingView Streaming (Tick-by-Tick)"
+                ],
+                index=0,
+                label_visibility="collapsed"
+            )
+        with ctrl3:
             live_sort = st.selectbox(
                 "Rank / Sort",
                 [
@@ -1564,21 +1575,33 @@ else:
                 index=0,
                 label_visibility="collapsed"
             )
-        with ctrl3:
+        with ctrl4:
+            auto_refresh_choice = st.selectbox(
+                "Auto-Refresh Timer",
+                [
+                    "⏱️ Auto: Off",
+                    "⏱️ Auto: 15s",
+                    "⏱️ Auto: 30s",
+                    "⏱️ Auto: 60s"
+                ],
+                index=0,
+                label_visibility="collapsed"
+            )
+        with ctrl5:
             if selected_live_folder != "All Watchlists Combined":
-                quick_add = st.text_input("Quick Add Ticker", placeholder=f"+ Add to {selected_live_folder} (e.g. AVGO)", label_visibility="collapsed").upper().strip()
+                quick_add = st.text_input("Quick Add Ticker", placeholder=f"+ Add to {selected_live_folder}", label_visibility="collapsed").upper().strip()
                 if quick_add and quick_add not in watchlists[selected_live_folder]:
                     watchlists[selected_live_folder].append(quick_add)
                     sync_watchlists_to_github(watchlists)
                     st.rerun()
             else:
-                st.caption("Viewing All Combined Lists")
-        with ctrl4:
-            if st.button("🔄 Refresh", use_container_width=True):
+                st.caption("All Combined Lists")
+        with ctrl6:
+            if st.button("🔄", help="Refresh Quotes Now", use_container_width=True):
                 st.cache_data.clear()
                 st.rerun()
-        with ctrl5:
-            edit_mode_live = st.checkbox("✏️ Edit / Reorder", value=False)
+        with ctrl7:
+            edit_mode_live = st.checkbox("✏️ Edit List", value=False)
 
         if edit_mode_live:
             target_edit_folder = selected_live_folder if selected_live_folder != "All Watchlists Combined" else folder_names[0]
@@ -1589,62 +1612,166 @@ else:
         else:
             active_live_syms = list(watchlists.get(selected_live_folder, []))
 
-        live_records = fetch_batch_market_data(active_live_syms, account_size=settings["account_size"])
+        refresh_interval_map = {
+            "⏱️ Auto: Off": None,
+            "⏱️ Auto: 15s": 15,
+            "⏱️ Auto: 30s": 30,
+            "⏱️ Auto: 60s": 60
+        }
+        run_every_sec = refresh_interval_map.get(auto_refresh_choice, None)
 
-        ordered_syms = [s for s in active_live_syms if s in live_records]
-        if live_sort == "Rank: 🟢 Action Signal (Buy First)":
-            ordered_syms = sorted(ordered_syms, key=lambda s: (live_records[s]["TCT_Priority"], -live_records[s]["Score"]))
-        elif live_sort == "Rank: 📈 Day % Change (Gainers)":
-            ordered_syms = sorted(ordered_syms, key=lambda s: live_records[s]["Change_Pct"], reverse=True)
-        elif live_sort == "Rank: 📉 Day % Change (Losers)":
-            ordered_syms = sorted(ordered_syms, key=lambda s: live_records[s]["Change_Pct"])
-        elif live_sort == "Rank: 🔥 Relative Strength vs S&P":
-            ordered_syms = sorted(ordered_syms, key=lambda s: live_records[s]["RS_Diff"], reverse=True)
-        elif live_sort == "Rank: 💯 Composite Score":
-            ordered_syms = sorted(ordered_syms, key=lambda s: live_records[s]["Score"], reverse=True)
+        def render_live_watchboard_content():
+            # When auto-refresh is enabled, advance the cache bucket every N seconds so yfinance pulls fresh quotes
+            bucket = int(time.time() // run_every_sec) if run_every_sec else int(time.time() // 120)
+            live_records = fetch_batch_market_data(active_live_syms, account_size=settings["account_size"], refresh_bucket=bucket)
 
-        # Build Large-Font, Tight-Width 2-Column HTML Tables (Signal replaces Rank #)
-        def build_half_table_html(sym_slice):
-            rows_html = ""
-            for sym in sym_slice:
-                d = live_records[sym]
-                chg = d["Change"]
-                pct = d["Change_Pct"]
-                color = "#15803d" if chg >= 0 else "#b91c1c"
-                sign = "+" if chg >= 0 else "-"
-                short_sig = d.get("TCT_Short_Sig", "🔵 Uptrend")
-                rows_html += (
-                    f'<tr>'
-                    f'<td>{short_sig}</td>'
-                    f'<td><a href="?rt_chart={sym}" target="_self" class="rt-sym-link" title="Tap to open live chart below">{sym}</a>'
-                    f'<a href="?inspect={sym}" target="_self" class="rt-dossier-link" title="Open Full TCT Dossier">📋</a></td>'
-                    f'<td style="font-weight:800; color:#18181b;">{d["Price"]:,.2f}</td>'
-                    f'<td style="color:{color}; font-weight:700;">{sign}{abs(chg):.2f} ({ "+" if pct >= 0 else "" }{pct:.2f}%)</td>'
-                    f'<td style="color:#15803d; font-weight:600;">{d["Day_High"]:,.2f}</td>'
-                    f'<td style="color:#b91c1c; font-weight:600;">{d["Day_Low"]:,.2f}</td>'
-                    f'</tr>'
-                )
-            return (
-                f'<table class="live-quote-table">'
-                f'<thead><tr><th>Signal</th><th>Symbol</th><th>Price</th><th>Day Chg</th><th>High</th><th>Low</th></tr></thead>'
-                f'<tbody>{rows_html}</tbody></table>'
-            )
+            ordered_syms = [s for s in active_live_syms if s in live_records]
+            # Append any symbols that might not have returned batch history so TradingView mode still shows them
+            missing_syms = [s for s in active_live_syms if s not in live_records]
 
-        if ordered_syms:
-            mid = (len(ordered_syms) + 1) // 2
-            left_syms = ordered_syms[:mid]
-            right_syms = ordered_syms[mid:]
+            if live_sort == "Rank: 🟢 Action Signal (Buy First)":
+                ordered_syms = sorted(ordered_syms, key=lambda s: (live_records[s]["TCT_Priority"], -live_records[s]["Score"]))
+            elif live_sort == "Rank: 📈 Day % Change (Gainers)":
+                ordered_syms = sorted(ordered_syms, key=lambda s: live_records[s]["Change_Pct"], reverse=True)
+            elif live_sort == "Rank: 📉 Day % Change (Losers)":
+                ordered_syms = sorted(ordered_syms, key=lambda s: live_records[s]["Change_Pct"])
+            elif live_sort == "Rank: 🔥 Relative Strength vs S&P":
+                ordered_syms = sorted(ordered_syms, key=lambda s: live_records[s]["RS_Diff"], reverse=True)
+            elif live_sort == "Rank: 💯 Composite Score":
+                ordered_syms = sorted(ordered_syms, key=lambda s: live_records[s]["Score"], reverse=True)
 
-            left_table_html = build_half_table_html(left_syms)
-            right_table_html = build_half_table_html(right_syms) if right_syms else ""
+            if live_board_mode.startswith("📊 Custom Signal Board"):
+                def build_half_table_html(sym_slice):
+                    rows_html = ""
+                    for sym in sym_slice:
+                        d = live_records[sym]
+                        chg = d["Change"]
+                        pct = d["Change_Pct"]
+                        color = "#15803d" if chg >= 0 else "#b91c1c"
+                        sign = "+" if chg >= 0 else "-"
+                        short_sig = d.get("TCT_Short_Sig", "🔵 Uptrend")
+                        rows_html += (
+                            f'<tr>'
+                            f'<td>{short_sig}</td>'
+                            f'<td><a href="?rt_chart={sym}" target="_self" class="rt-sym-link" title="Tap to open live chart below">{sym}</a>'
+                            f'<a href="?inspect={sym}" target="_self" class="rt-dossier-link" title="Open Full TCT Dossier">📋</a></td>'
+                            f'<td style="font-weight:800; color:#18181b;">{d["Price"]:,.2f}</td>'
+                            f'<td style="color:{color}; font-weight:700;">{sign}{abs(chg):.2f} ({ "+" if pct >= 0 else "" }{pct:.2f}%)</td>'
+                            f'<td style="color:#15803d; font-weight:600;">{d["Day_High"]:,.2f}</td>'
+                            f'<td style="color:#b91c1c; font-weight:600;">{d["Day_Low"]:,.2f}</td>'
+                            f'</tr>'
+                        )
+                    return (
+                        f'<table class="live-quote-table">'
+                        f'<thead><tr><th>Signal</th><th>Symbol</th><th>Price</th><th>Day Chg</th><th>High</th><th>Low</th></tr></thead>'
+                        f'<tbody>{rows_html}</tbody></table>'
+                    )
 
-            st.markdown(
-                f'<div class="live-board-grid"><div>{left_table_html}</div><div>{right_table_html}</div></div>',
-                unsafe_allow_html=True
-            )
-            st.caption("🟢 Buy Now · 📐 TCT Box · 🔵 Uptrend · 🟡 Wait · 🔴 Below 50 EMA  |  **Tap any Stock Symbol** to open its Live Chart below · Tap **📋** for Full TCT Dossier.")
+                if ordered_syms:
+                    mid = (len(ordered_syms) + 1) // 2
+                    left_syms = ordered_syms[:mid]
+                    right_syms = ordered_syms[mid:]
+
+                    left_table_html = build_half_table_html(left_syms)
+                    right_table_html = build_half_table_html(right_syms) if right_syms else ""
+
+                    st.markdown(
+                        f'<div class="live-board-grid"><div>{left_table_html}</div><div>{right_table_html}</div></div>',
+                        unsafe_allow_html=True
+                    )
+                    timer_status = f"Auto-refreshing every {run_every_sec}s" if run_every_sec else "Manual refresh mode"
+                    st.caption(f"🟢 Buy Now · 📐 TCT Box · 🔵 Uptrend · 🟡 Wait · 🔴 Below 50 EMA  |  **Tap any Stock Symbol** for Bottom Live Chart · Tap **📋** for Dossier  |  *{timer_status} · Last updated: {datetime.now().strftime('%H:%M:%S')}*")
+                else:
+                    st.info("No symbols found in this watchlist. Use the box above or '✏️ Edit List' to add stocks.")
+
+            else:
+                # MODE 2: TRADINGVIEW LIVE STREAMING MODE (2-COLUMN SIDE-BY-SIDE WIDGETS + TICKER TAPE)
+                tv_all_syms = ordered_syms + missing_syms
+                if tv_all_syms:
+                    tape_symbols = [
+                        {"proName": "FOREXCOM:SPXUSD", "title": "S&P 500"},
+                        {"proName": "FOREXCOM:NSXUSD", "title": "Nasdaq 100"},
+                        {"proName": "BITSTAMP:BTCUSD", "title": "Bitcoin"}
+                    ] + [{"proName": s, "title": s} for s in tv_all_syms[:25]]
+
+                    components.html(f"""
+                    <div class="tradingview-widget-container">
+                      <div class="tradingview-widget-container__widget"></div>
+                      <script type="text/javascript" src="https://s3.tradingview.com/external-embedding/embed-widget-ticker-tape.js" async>
+                      {{
+                        "symbols": {json.dumps(tape_symbols)},
+                        "showSymbolLogo": true,
+                        "isTransparent": false,
+                        "displayMode": "compact",
+                        "colorTheme": "light",
+                        "locale": "en"
+                      }}
+                      </script>
+                    </div>
+                    """, height=52)
+
+                    mid = (len(tv_all_syms) + 1) // 2
+                    left_tv = [{"name": s, "displayName": f"{live_records[s]['TCT_Dot']} {s}" if s in live_records else s} for s in tv_all_syms[:mid]]
+                    right_tv = [{"name": s, "displayName": f"{live_records[s]['TCT_Dot']} {s}" if s in live_records else s} for s in tv_all_syms[mid:]]
+                    widget_height = max(420, min(780, mid * 36 + 85))
+
+                    tv_c1, tv_c2 = st.columns(2)
+                    with tv_c1:
+                        left_payload = [{"name": f"{selected_live_folder} (1–{len(left_tv)})", "originalName": "Indices", "symbols": left_tv}]
+                        components.html(f"""
+                        <div class="tradingview-widget-container">
+                          <div class="tradingview-widget-container__widget"></div>
+                          <script type="text/javascript" src="https://s3.tradingview.com/external-embedding/embed-widget-market-quotes.js" async>
+                          {{
+                            "width": "100%",
+                            "height": {widget_height},
+                            "symbolsGroups": {json.dumps(left_payload)},
+                            "showSymbolLogo": true,
+                            "isTransparent": false,
+                            "colorTheme": "light",
+                            "locale": "en"
+                          }}
+                          </script>
+                        </div>
+                        """, height=widget_height + 10)
+
+                    with tv_c2:
+                        if right_tv:
+                            right_payload = [{"name": f"{selected_live_folder} ({mid+1}–{len(tv_all_syms)})", "originalName": "Futures", "symbols": right_tv}]
+                            components.html(f"""
+                            <div class="tradingview-widget-container">
+                              <div class="tradingview-widget-container__widget"></div>
+                              <script type="text/javascript" src="https://s3.tradingview.com/external-embedding/embed-widget-market-quotes.js" async>
+                              {{
+                                "width": "100%",
+                                "height": {widget_height},
+                                "symbolsGroups": {json.dumps(right_payload)},
+                                "showSymbolLogo": true,
+                                "isTransparent": false,
+                                "colorTheme": "light",
+                                "locale": "en"
+                              }}
+                              </script>
+                            </div>
+                            """, height=widget_height + 10)
+
+                    # Quick-tap pills so Option A Bottom Live Chart & Full Dossier work in TradingView Mode too
+                    pills_bar = "".join([
+                        f'<a href="?rt_chart={s}" target="_self" class="pill" title="Open Bottom Live Chart">{live_records[s]["TCT_Dot"] if s in live_records else "📈"} {s}</a>'
+                        for s in tv_all_syms
+                    ])
+                    st.markdown(f"<div style='margin-top:4px;'><b>Tap any symbol to open Bottom Live Chart:</b><br>{pills_bar}</div>", unsafe_allow_html=True)
+                else:
+                    st.info("No symbols in this watchlist.")
+
+        # Use Streamlit Fragment if auto-refresh timer is active
+        if run_every_sec and hasattr(st, "fragment"):
+            @st.fragment(run_every=run_every_sec)
+            def _auto_refresh_fragment():
+                render_live_watchboard_content()
+            _auto_refresh_fragment()
         else:
-            st.info("No symbols found in this watchlist. Use the box above or '✏️ Edit / Reorder' to add stocks.")
+            render_live_watchboard_content()
 
         # OPTION A: BOTTOM LIVE CHART (ONLY SHOWN WHEN A STOCK SYMBOL IS TAPPED)
         if st.session_state.rt_chart_symbol:
