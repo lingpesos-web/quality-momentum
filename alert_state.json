@@ -6,6 +6,7 @@
     "AMD_STOP",
     "APP_STOP",
     "COHR_STOP",
+    "CRDO_STOP",
     "CRWD_STOP",
     "GLW_STOP",
     "GME_STOP",
@@ -17,6 +18,7 @@
     "QUBT_STOP",
     "STX_STOP",
     "TEM_STOP",
+    "VRT_STOP",
     "WDC_STOP"
   ]
 }
