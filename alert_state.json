@@ -3,6 +3,7 @@
   "alerted": [
     "ADPT_STOP",
     "AMAT_STOP",
+    "AMD_STOP",
     "COHR_STOP",
     "CRCL_BUY",
     "CRWD_STOP",
