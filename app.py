@@ -1511,7 +1511,28 @@ else:
 
             with (left_c if idx % 2 == 0 else right_c):
                 st.markdown(
-                    f'<div class="stock-card"><div style="display: flex; justify-content: space-between; align-items: flex-start;"><div><a href="?inspect={d["Ticker"]}" target="_self" class="ticker-link">📊 {d["Ticker"]}</a><span class="badge {d["TCT_Badge"]}" style="margin-left: 8px;">{d["TCT_Action"]}</span>{rs_html}{earn_html}<div style="font-size: 1.35rem; font-weight: 700; margin-top: 6px;">${d["Price"]:,.2f} <span style="font-size: 0.9rem; color: {"#15803d" if d["Change"]>=0 else "#b91c1c"}; font-weight: 700;">{arr_w}${abs(d["Change"]):.2f} ({d["Change_Pct"]:+.2f}%)</span></div></div><div style="text-align: right;"><div style="font-size: 1.6rem; font-weight: 700; color: #c5a059; font-family: \'Newsreader\', serif;">{d["Score"]}</div><div style="font-size: 0.7rem; color: #71717a; text-transform: uppercase;">Score</div></div></div><div class="trade-ticket"><div style="display: flex; justify-content: space-between; font-weight: 700; color: #0f291e; margin-bottom: 4px;"><span>{d["TCT_Model"]}</span><span>📐 Reward/Risk: {d["R_Multiple"]:.1f}R</span></div><div style="display: flex; justify-content: space-between;"><span>🎯 <b>Buy Trigger:</b> ${d["BOS_Level"]:,.2f}</span><span>🟢 <b>Take Profit:</b> <span style="color:#15803d; font-weight:700;">${d["Target_Price"]:,.2f}</span> (+{d["Target_Pct"]:.1f}%)</span></div><div style="margin-top: 4px; display: flex; justify-content: space-between;"><span>🔴 <b>Stop-Loss:</b> <span style="color:#b91c1c; font-weight:700;">${d["Stop_Price"]:,.2f}</span> ({d["Stop_Pct"]:.1f}%)</span><span><b>0.5% Size:</b> {d["Shares_05Pct']} shs (${d["Pos_Value"]:,.0f})</span></div></div><div style="display: flex; justify-content: space-between; align-items: center; margin-top: 8px; font-size: 0.78rem; color: #52525b;"><div>Day High: <b>${d["Day_High"]:,.2f}</b></div><div>Day Low: <b>${d["Day_Low"]:,.2f}</b></div><div>RSI(14/2): <b>{d["RSI"]:.0f}/{d["RSI2"]:.0f}</b></div><div>EMA 50: <b>${d["EMA50_Val"]:,.2f}</b></div></div><div style="font-size: 0.80rem; color: #475569; margin-top: 6px; font-style: italic;">"{d["TCT_Explain"]}"</div></div>',
+                    f'<div class="stock-card">'
+                    f'<div style="display: flex; justify-content: space-between; align-items: flex-start;">'
+                    f'<div><a href="?inspect={d["Ticker"]}" target="_self" class="ticker-link">📊 {d["Ticker"]}</a>'
+                    f'<span class="badge {d["TCT_Badge"]}" style="margin-left: 8px;">{d["TCT_Action"]}</span>{rs_html}{earn_html}'
+                    f'<div style="font-size: 1.35rem; font-weight: 700; margin-top: 6px;">'
+                    f'${d["Price"]:,.2f} <span style="font-size: 0.9rem; color: {"#15803d" if d["Change"]>=0 else "#b91c1c"}; font-weight: 700;">'
+                    f'{arr_w}${abs(d["Change"]):.2f} ({d["Change_Pct"]:+.2f}%)</span></div></div>'
+                    f'<div style="text-align: right;"><div style="font-size: 1.6rem; font-weight: 700; color: #c5a059; font-family: \'Newsreader\', serif;">{d["Score"]}</div>'
+                    f'<div style="font-size: 0.7rem; color: #71717a; text-transform: uppercase;">Score</div></div></div>'
+                    f'<div class="trade-ticket">'
+                    f'<div style="display: flex; justify-content: space-between; font-weight: 700; color: #0f291e; margin-bottom: 4px;">'
+                    f'<span>{d["TCT_Model"]}</span><span>📐 Reward/Risk: {d["R_Multiple"]:.1f}R</span></div>'
+                    f'<div style="display: flex; justify-content: space-between;">'
+                    f'<span>🎯 <b>Buy Trigger:</b> ${d["BOS_Level"]:,.2f}</span>'
+                    f'<span>🟢 <b>Take Profit:</b> <span style="color:#15803d; font-weight:700;">${d["Target_Price"]:,.2f} (+{d["Target_Pct"]:.1f}%)</span></span></div>'
+                    f'<div style="margin-top: 4px; display: flex; justify-content: space-between;">'
+                    f'<span>🔴 <b>Stop-Loss:</b> <span style="color:#b91c1c; font-weight:700;">${d["Stop_Price"]:,.2f} ({d["Stop_Pct"]:.1f}%)</span></span>'
+                    f'<span><b>0.5% Size:</b> {d["Shares_05Pct"]} shs (${d["Pos_Value"]:,.0f})</span></div></div>'
+                    f'<div style="display: flex; justify-content: space-between; align-items: center; margin-top: 8px; font-size: 0.78rem; color: #52525b;">'
+                    f'<div>Day High: <b>${d["Day_High"]:,.2f}</b></div><div>Day Low: <b>${d["Day_Low"]:,.2f}</b></div>'
+                    f'<div>RSI(14/2): <b>{d["RSI"]:.0f}/{d["RSI2"]:.0f}</b></div><div>EMA 50: <b>${d["EMA50_Val"]:,.2f}</b></div></div>'
+                    f'<div style="font-size: 0.80rem; color: #475569; margin-top: 6px; font-style: italic;">"{d["TCT_Explain"]}"</div></div>',
                     unsafe_allow_html=True
                 )
 
@@ -1533,7 +1554,23 @@ else:
                     arr_m = "▲ +" if m["Change"] >= 0 else "▼ -"
                     with (c1 if idx % 2 == 0 else c2):
                         st.markdown(
-                            f'<div class="stock-card"><div style="display:flex; justify-content:space-between; align-items:center;"><div style="font-size: 0.76rem; color: #71717a; text-transform: uppercase; font-weight: 700;">{title}</div><span class="badge {m["TCT_Badge"]}">{m["TCT_Action"]}</span></div><div style="display: flex; justify-content: space-between; align-items: baseline; margin-top: 6px;"><div><a href="?inspect={sym}" target="_self" class="ticker-link">📊 {sym}</a><span style="font-size: 1.45rem; font-weight: 700; color: #0f291e; margin-left: 10px;">${m["Price"]:,.{decimals}f}</span><span style="font-size: 0.92rem; color: {"#15803d" if m["Change"]>=0 else "#b91c1c"}; font-weight: 700; margin-left: 6px;">{arr_m}${abs(m["Change"]):.{decimals}f} ({m["Change_Pct"]:+.2f}%)</span></div><span class="badge {m["Badge"]}">{m["State"]}</span></div><div class="trade-ticket"><div style="display:flex; justify-content:space-between;"><span>🎯 <b>Buy Trigger:</b> ${m["BOS_Level"]:,.{decimals}f}</span><span>📐 <b>Reward/Risk:</b> {m["R_Multiple"]:.1f}R</span></div><div style="display:flex; justify-content:space-between; margin-top:3px;"><span>🟢 <b>Target:</b> <b style="color:#15803d;">${m["Target_Price"]:,.{decimals}f}</b> (+{m["Target_Pct"]:.1f}%)</span><span>🔴 <b>Stop:</b> <b style="color:#b91c1c;">${m["Stop_Price"]:,.{decimals}f}</b> ({m["Stop_Pct"]:.1f}%)</span></div></div><div style="margin-top: 8px; font-size: 0.78rem; color: #52525b; display:flex; justify-content:space-between;"><span>Day High: <b>${m["Day_High"]:,.{decimals}f}</b></span><span>Day Low: <b>${m["Day_Low"]:,.{decimals}f}</b></span><span>RSI: <b>{m["RSI"]:.1f}</b></span><span>EMA 50: <b>${m["EMA50_Val"]:,.{decimals}f}</b></span></div></div>',
+                            f'<div class="stock-card"><div style="display:flex; justify-content:space-between; align-items:center;">'
+                            f'<div style="font-size: 0.76rem; color: #71717a; text-transform: uppercase; font-weight: 700;">{title}</div>'
+                            f'<span class="badge {m["TCT_Badge"]}">{m["TCT_Action"]}</span></div>'
+                            f'<div style="display: flex; justify-content: space-between; align-items: baseline; margin-top: 6px;">'
+                            f'<div><a href="?inspect={sym}" target="_self" class="ticker-link">📊 {sym}</a>'
+                            f'<span style="font-size: 1.45rem; font-weight: 700; color: #0f291e; margin-left: 10px;">${m["Price"]:,.{decimals}f}</span>'
+                            f'<span style="font-size: 0.92rem; color: {"#15803d" if m["Change"]>=0 else "#b91c1c"}; font-weight: 700; margin-left: 6px;">'
+                            f'{arr_m}${abs(m["Change"]):.{decimals}f} ({m["Change_Pct"]:+.2f}%)</span></div>'
+                            f'<span class="badge {m["Badge"]}">{m["State"]}</span></div>'
+                            f'<div class="trade-ticket"><div style="display:flex; justify-content:space-between;">'
+                            f'<span>🎯 <b>Buy Trigger:</b> ${m["BOS_Level"]:,.{decimals}f}</span><span>📐 <b>Reward/Risk:</b> {m["R_Multiple"]:.1f}R</span></div>'
+                            f'<div style="display:flex; justify-content:space-between; margin-top:3px;">'
+                            f'<span>🟢 <b>Target:</b> <b style="color:#15803d;">${m["Target_Price"]:,.{decimals}f}</b> (+{m["Target_Pct"]:.1f}%)</span>'
+                            f'<span>🔴 <b>Stop:</b> <b style="color:#b91c1c;">${m["Stop_Price"]:,.{decimals}f}</b> ({m["Stop_Pct"]:.1f}%)</span></div></div>'
+                            f'<div style="margin-top: 8px; font-size: 0.78rem; color: #52525b; display:flex; justify-content:space-between;">'
+                            f'<span>Day High: <b>${m["Day_High"]:,.{decimals}f}</b></span><span>Day Low: <b>${m["Day_Low"]:,.{decimals}f}</b></span>'
+                            f'<span>RSI: <b>{m["RSI"]:.1f}</b></span><span>EMA 50: <b>${m["EMA50_Val"]:,.{decimals}f}</b></span></div></div>',
                             unsafe_allow_html=True
                         )
 
