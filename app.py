@@ -13,13 +13,12 @@ import urllib.request
 import urllib.parse
 import xml.etree.ElementTree as ET
 import email.utils
-from datetime import datetime, timezone, timedelta
-from zoneinfo import ZoneInfo
+from datetime import datetime, timezone
 from concurrent.futures import ThreadPoolExecutor
 
 # --- PAGE SETUP ---
 st.set_page_config(
-    page_title="Quality Momentum, Swing & TCT Cockpit",
+    page_title="Quality Momentum & TCT Cockpit",
     page_icon="📈",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -37,6 +36,7 @@ if "screener_matches" not in st.session_state:
 if "screener_title" not in st.session_state:
     st.session_state.screener_title = None
 
+# Handle clickable links (?inspect=SYM or ?rt_chart=SYM) and immediately clean URL
 if "inspect" in st.query_params:
     clicked_sym = st.query_params.get("inspect", "").strip().upper()
     if clicked_sym:
@@ -61,7 +61,7 @@ def send_ntfy_alert(message, title="Daily Portfolio Briefing"):
     try:
         ascii_title = title.encode("ascii", "ignore").decode("ascii").strip()
         if not ascii_title:
-            ascii_title = "Momentum and Swing Alert"
+            ascii_title = "Momentum and TCT Alert"
         req = urllib.request.Request(
             "https://ntfy.sh/2026_USstockspicks",
             data=message.encode("utf-8"),
@@ -308,7 +308,7 @@ h1, h2, h3 {
 }
 .live-quote-table td:nth-child(1) {
     text-align: left;
-    font-size: 0.92rem;
+    font-size: 0.94rem;
     font-weight: 700;
     padding-left: 6px;
     padding-right: 4px;
@@ -687,155 +687,35 @@ def fetch_upcoming_earnings_map(tickers):
     return out
 
 
-# --- US MARKET SESSION CLOCK & 8:00 AM HKT SETTLEMENT GLITCH PATCHER ---
-def get_expected_us_session_date_and_pace():
-    """
-    Returns (expected_latest_us_trading_date, intraday_volume_pace_fraction).
-    Fixes the 8:00 AM HKT (8:00 PM ET) Yahoo Finance daily bar rollover drop
-    and scales intraday volume pace during open market hours.
-    """
-    now_ny = datetime.now(ZoneInfo("America/New_York"))
-    weekday = now_ny.weekday()  # 0=Mon .. 6=Sun
-    mins_now = now_ny.hour * 60 + now_ny.minute
-
-    if weekday == 5:  # Saturday -> Friday was last session
-        expected_date = (now_ny - timedelta(days=1)).date()
-        pace = 1.0
-    elif weekday == 6:  # Sunday -> Friday was last session
-        expected_date = (now_ny - timedelta(days=2)).date()
-        pace = 1.0
-    else:
-        if mins_now < (9 * 60 + 32):
-            # Before 9:32 AM ET on a weekday -> previous trading day
-            prev_days = 3 if weekday == 0 else 1
-            expected_date = (now_ny - timedelta(days=prev_days)).date()
-            pace = 1.0
-        elif mins_now < (16 * 60):
-            # Regular US Market Hours (9:32 AM to 4:00 PM ET) -> scale volume pace
-            expected_date = now_ny.date()
-            elapsed = max(15, mins_now - (9 * 60 + 30))
-            pace = min(1.0, max(0.08, elapsed / 390.0))
-        else:
-            # After 4:00 PM ET (including 8:00 PM ET / 8:00 AM HKT settlement window!)
-            expected_date = now_ny.date()
-            pace = 1.0
-
-    return expected_date, pace
-
-def patch_df_with_1h_session(df_daily, df_1h):
-    """
-    If Yahoo Finance's 1d dataframe temporarily dropped the latest completed US session
-    (e.g. around 8:00 AM HKT), reconstructs the missing daily bar from 1h regular-hours bars.
-    """
-    if df_1h is None or df_1h.empty or df_daily.empty:
-        return df_daily
-    try:
-        sub_1h = df_1h.dropna(subset=["Close", "High", "Low", "Open"])
-        if sub_1h.empty:
-            return df_daily
-        last_1d_date = pd.to_datetime(df_daily.index[-1]).date()
-        idx_dates = pd.to_datetime(sub_1h.index).date
-        latest_1h_date = idx_dates[-1]
-
-        if latest_1h_date > last_1d_date:
-            day_bars = sub_1h[idx_dates == latest_1h_date]
-            if not day_bars.empty:
-                new_row = pd.DataFrame({
-                    "Open": [float(day_bars["Open"].iloc[0])],
-                    "High": [float(day_bars["High"].max())],
-                    "Low": [float(day_bars["Low"].min())],
-                    "Close": [float(day_bars["Close"].iloc[-1])],
-                    "Volume": [float(day_bars["Volume"].sum())]
-                }, index=[pd.Timestamp(latest_1h_date)])
-                df_patched = pd.concat([df_daily[["Open", "High", "Low", "Close", "Volume"]], new_row])
-                return df_patched
-    except Exception:
-        pass
-    return df_daily
-
-
-# --- 6-PLAYBOOK MULTI-STRATEGY ENGINE (TCT + 4 SWING STRATEGIES + MOMENTUM) ---
-def analyze_multi_playbook(df, account_size=100000, spy_ret_63d=0.0, df_1h=None, vol_pace=1.0):
-    """
-    Evaluates 6 distinct rules-based strategies for each stock:
-      1. 📐 TCT Bottom Accumulation (25+ bar slow decline, Tap 1/2/3 & BOS)
-      2. 🎯 20-EMA 'Holy Grail' Pullback Swing (Strong uptrend dip to 20 EMA + curl up)
-      3. ⚡ Volatility Squeeze Breakout (Bollinger Band / 5-day tight range coil breakout)
-      4. 🪃 RSI-2 Oversold Snapback (Larry Connors mean-reversion bounce above 200 EMA)
-      5. 🔥 High-Volume Gap Ignition (Power volume >=1.8x surge holding top of range)
-      6. 🚀 Momentum Trend Swing (20-day / 5-day breakout & trend following)
-    """
+# --- DUAL-PLAYBOOK ENGINE: TRUE TCT ACCUMULATION vs. MOMENTUM TREND SWING ---
+def analyze_dual_playbook(df, account_size=100000, spy_ret_63d=0.0, df_1h=None):
     n = len(df)
-    open_arr = df["Open"].values.astype(float)
     close_arr = df["Close"].values.astype(float)
     high_arr = df["High"].values.astype(float)
     low_arr = df["Low"].values.astype(float)
     vol_arr = df["Volume"].values.astype(float)
     curr_close = float(close_arr[-1])
     prev_close = float(close_arr[-2]) if n >= 2 else curr_close
-    curr_open = float(open_arr[-1])
-    curr_high = float(high_arr[-1])
-    curr_low = float(low_arr[-1])
 
-    # Relative Strength vs S&P 500 (63-Day / 3-Month)
     lookback_rs = min(63, n - 1)
     stock_ret_63d = ((curr_close - float(close_arr[-1 - lookback_rs])) / float(close_arr[-1 - lookback_rs])) * 100.0 if lookback_rs > 5 else 0.0
     rs_diff = stock_ret_63d - spy_ret_63d
     rs_leader = bool(rs_diff >= 2.0)
 
-    # Liquidity Check: 20D Median Daily Dollar Volume >= $50M
     dollar_vol_20 = pd.Series(close_arr[-20:] * vol_arr[-20:]).median() if n >= 20 else 0.0
     liq_pass = bool(dollar_vol_20 >= 50_000_000)
-
-    # Moving Averages & ATR(14)
-    ema20_ser = df["Close"].ewm(span=20, adjust=False).mean()
-    ema50_ser = df["Close"].ewm(span=50, adjust=False).mean()
-    ema200_ser = df["Close"].ewm(span=200, adjust=False).mean()
-    ema20 = float(ema20_ser.iloc[-1])
-    ema50 = float(ema50_ser.iloc[-1])
-    ema200 = float(ema200_ser.iloc[-1]) if n >= 100 else ema50 * 0.92
 
     tr1 = df["High"] - df["Low"]
     tr2 = (df["High"] - df["Close"].shift(1)).abs()
     tr3 = (df["Low"] - df["Close"].shift(1)).abs()
-    tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
-    atr_ser = tr.rolling(14).mean()
-    atr14_daily = float(atr_ser.iloc[-1]) if not np.isnan(atr_ser.iloc[-1]) and float(atr_ser.iloc[-1]) > 0 else curr_close * 0.025
+    atr14_daily = float(pd.concat([tr1, tr2, tr3], axis=1).max(axis=1).rolling(14).mean().iloc[-1])
+    if np.isnan(atr14_daily) or atr14_daily <= 0:
+        atr14_daily = curr_close * 0.025
     atr14_1h_est = atr14_daily / 2.55
 
-    # ADX(14) for Trend Strength
-    up_move = df["High"] - df["High"].shift(1)
-    down_move = df["Low"].shift(1) - df["Low"]
-    pos_dm = np.where((up_move > down_move) & (up_move > 0), up_move, 0.0)
-    neg_dm = np.where((down_move > up_move) & (down_move > 0), down_move, 0.0)
-    pos_di = 100 * (pd.Series(pos_dm, index=df.index).rolling(14).mean() / (atr_ser + 1e-9))
-    neg_di = 100 * (pd.Series(neg_dm, index=df.index).rolling(14).mean() / (atr_ser + 1e-9))
-    dx = 100 * ((pos_di - neg_di).abs() / (pos_di + neg_di + 1e-9))
-    adx_val = float(dx.rolling(14).mean().iloc[-1]) if len(dx) >= 28 and not np.isnan(dx.rolling(14).mean().iloc[-1]) else 22.0
+    ema20 = float(df["Close"].ewm(span=20, adjust=False).mean().iloc[-1])
+    ema50 = float(df["Close"].ewm(span=50, adjust=False).mean().iloc[-1])
 
-    # 2-Period RSI (Larry Connors RSI-2)
-    delta_c = df["Close"].diff()
-    gain2 = delta_c.where(delta_c > 0, 0.0).ewm(alpha=1/2, adjust=False).mean()
-    loss2 = (-delta_c.where(delta_c < 0, 0.0)).ewm(alpha=1/2, adjust=False).mean()
-    rsi2 = float(100 - (100 / (1 + (gain2.iloc[-1] / (loss2.iloc[-1] + 1e-9)))))
-
-    # Bollinger Band Width & 5-Day Tight Coil Width
-    bb_mid = df["Close"].rolling(20).mean()
-    bb_std = df["Close"].rolling(20).std()
-    bb_width_ser = ((bb_std * 4.0) / (bb_mid + 1e-9)) * 100.0
-    curr_bb_width = float(bb_width_ser.iloc[-1]) if not np.isnan(bb_width_ser.iloc[-1]) else 10.0
-    min_bb_width_60 = float(bb_width_ser.iloc[-60:].quantile(0.25)) if n >= 60 else 6.0
-
-    high_5d_prev = float(np.max(high_arr[-6:-1])) if n >= 7 else curr_high
-    low_5d_prev = float(np.min(low_arr[-6:-1])) if n >= 7 else curr_low
-    coil_5d_pct = ((high_5d_prev - low_5d_prev) / curr_close) * 100.0 if curr_close > 0 else 10.0
-
-    # Pace-Adjusted Volume Ratio
-    vol20 = float(df["Volume"].rolling(20).iloc[-20:-1].mean()) if n >= 21 else float(np.mean(vol_arr))
-    paced_vol_today = (float(vol_arr[-1]) / max(vol_pace, 0.08))
-    paced_rvol = (paced_vol_today / vol20) if vol20 > 0 else 1.0
-
-    # Confirmed Daily Swing Points (k = 3)
     swing_highs = []
     swing_lows = []
     for i in range(3, n - 3):
@@ -844,12 +724,12 @@ def analyze_multi_playbook(df, account_size=100000, spy_ret_63d=0.0, df_1h=None,
         if low_arr[i] == np.min(low_arr[i - 3:i + 4]):
             swing_lows.append((i, float(low_arr[i])))
 
-    # --- CHECK PLAYBOOK 1: TRUE TCT BOTTOM ACCUMULATION (Handbook Rules) ---
     lookback = min(n, 130)
     start_idx = n - lookback
     peak_rel_idx = int(np.argmax(high_arr[start_idx:max(start_idx + 1, n - 20)]))
     peak_idx = start_idx + peak_rel_idx
     peak_price = float(high_arr[peak_idx])
+
     recent_lows = [(idx, val) for idx, val in swing_lows if idx > peak_idx]
 
     tct_valid_range = False
@@ -858,7 +738,6 @@ def analyze_multi_playbook(df, account_size=100000, spy_ret_63d=0.0, df_1h=None,
     tap1_price, tap2_price, tap3_price = None, None, None
     range_high, bos_level = None, None
     playbook_name = "🚀 Momentum Trend Swing"
-    swing_type = "MOMENTUM"
 
     if len(recent_lows) >= 2 and curr_close <= peak_price * 0.92:
         for i_l in range(len(recent_lows) - 1):
@@ -876,7 +755,8 @@ def analyze_multi_playbook(df, account_size=100000, spy_ret_63d=0.0, df_1h=None,
                 dev_limit = t1_val - 0.30 * rng_height
                 min_close_t2 = float(np.min(close_arr[t1_idx:t2_idx + 1]))
                 if t2_val <= t1_val * 1.015 and min_close_t2 >= dev_limit:
-                    if (t2_idx - peak_idx) < 25:
+                    bars_decline = t2_idx - peak_idx
+                    if bars_decline < 25:
                         continue
                     slow_decline_25 = True
                     flush_ok = True
@@ -909,106 +789,38 @@ def analyze_multi_playbook(df, account_size=100000, spy_ret_63d=0.0, df_1h=None,
                         tct_valid_range = True
                         Model_Tag = "TCT Model 1 (Sweep)" if tap3_price < tap2_price else "TCT Model 2 (Higher Low)"
                         playbook_name = f"📐 {Model_Tag}"
-                        swing_type = "TCT_BOTTOM"
                         break
             if tct_valid_range:
                 break
 
-    # --- CHECK 4 SWING TRADE STRATEGIES IF NOT IN A TCT BOTTOM BOX ---
-    is_ema20_pullback = False
-    is_squeeze_coil = False
-    is_rsi2_snapback = False
-    is_gap_ignition = False
-
-    if not tct_valid_range:
-        # Swing 1: 🎯 20-EMA "Holy Grail" Pullback Swing
-        touched_ema20_recently = (float(np.min(low_arr[-3:])) <= ema20 * 1.018) and (curr_close >= ema20 * 0.988)
-        if curr_close > ema50 and ema20 > ema50 and adx_val >= 20.0 and touched_ema20_recently and (curr_close <= high_5d_prev * 0.992):
-            is_ema20_pullback = True
-            playbook_name = "🎯 20-EMA Pullback Swing"
-            swing_type = "EMA20_PULLBACK"
-
-        # Swing 2: ⚡ Volatility Contraction / Bollinger Band Squeeze
-        if not is_ema20_pullback and curr_close > ema50 and ((curr_bb_width <= min_bb_width_60 * 1.10) or (coil_5d_pct <= 4.8)):
-            is_squeeze_coil = True
-            playbook_name = "⚡ Volatility Squeeze Swing"
-            swing_type = "VOL_SQUEEZE"
-
-        # Swing 3: 🪃 RSI-2 Oversold Snapback (Larry Connors)
-        three_red_days = (n >= 4) and (close_arr[-2] < close_arr[-3] < close_arr[-4])
-        if not is_ema20_pullback and not is_squeeze_coil and curr_close > ema200 and (rsi2 <= 18.0 or (three_red_days and rsi2 <= 28.0)):
-            is_rsi2_snapback = True
-            playbook_name = f"🪃 RSI-2 Oversold Bounce (RSI2={rsi2:.0f})"
-            swing_type = "RSI2_BOUNCE"
-
-        # Swing 4: 🔥 High-Volume Gap / Catalyst Ignition
-        day_chg_pct = ((curr_close - prev_close) / prev_close) * 100.0 if prev_close > 0 else 0.0
-        candle_range = max(curr_high - curr_low, 1e-6)
-        close_in_top_60 = ((curr_close - curr_low) / candle_range) >= 0.55
-        if day_chg_pct >= 3.2 and paced_rvol >= 1.65 and curr_close > ema50 and close_in_top_60:
-            is_gap_ignition = True
-            playbook_name = f"🔥 High-Vol Ignition ({paced_rvol:.1f}x Vol)"
-            swing_type = "GAP_IGNITION"
-
-    # --- CALCULATE EXACT BUY TRIGGER, STOP-LOSS & TAKE PROFIT FOR ACTIVE PLAYBOOK ---
-    high20_prev = float(np.max(high_arr[-21:-1])) if n >= 22 else high_5d_prev
-
-    if swing_type == "TCT_BOTTOM" and range_high and bos_level and tap3_price:
+    if tct_valid_range and range_high and bos_level and tap3_price:
         entry_ref = curr_close if curr_close >= bos_level else bos_level
         raw_stop = tap3_price - (0.5 * atr14_1h_est)
-        effective_stop = max(min(raw_stop, entry_ref * 0.98), entry_ref * 0.93)
+        min_stop = entry_ref * 0.98
+        max_stop = entry_ref * 0.93
+        effective_stop = min(raw_stop, min_stop)
+        effective_stop = max(effective_stop, max_stop)
         target_price = range_high
-
-    elif swing_type == "EMA20_PULLBACK":
-        # Buy Trigger is breaking above yesterday's high (or current price if already bouncing above it)
-        prev_bar_high = float(high_arr[-2]) if n >= 2 else curr_close
-        bos_level = prev_bar_high if prev_bar_high <= curr_close * 1.025 else (curr_close * 1.005)
-        entry_ref = curr_close if curr_close >= bos_level else bos_level
-        pullback_low = float(np.min(low_arr[-4:]))
-        raw_stop = min(pullback_low - 0.3 * atr14_daily, ema50 * 0.995)
-        effective_stop = max(min(raw_stop, entry_ref * 0.978), entry_ref * 0.94)
-        risk_unit = entry_ref - effective_stop
-        target_price = max(high20_prev, entry_ref + 2.5 * risk_unit)
-
-    elif swing_type == "VOL_SQUEEZE":
-        # Buy Trigger is top of the tight 5-day coil
-        bos_level = high_5d_prev
-        entry_ref = curr_close if curr_close >= bos_level else bos_level
-        raw_stop = low_5d_prev - (0.3 * atr14_daily)
-        effective_stop = max(min(raw_stop, entry_ref * 0.978), entry_ref * 0.945)
-        risk_unit = entry_ref - effective_stop
-        target_price = entry_ref + (3.0 * risk_unit)
-
-    elif swing_type == "RSI2_BOUNCE":
-        # Buy Trigger is reclaiming yesterday's close (or current price on green turn)
-        bos_level = prev_close if curr_close < prev_close else curr_close
-        entry_ref = curr_close
-        raw_stop = min(curr_low, float(np.min(low_arr[-3:]))) - (0.8 * atr14_daily)
-        effective_stop = max(min(raw_stop, entry_ref * 0.975), entry_ref * 0.94)
-        risk_unit = entry_ref - effective_stop
-        # Mean reversion target back to 20-day EMA or 2.2R
-        target_price = max(ema20, entry_ref + 2.2 * risk_unit)
-
-    elif swing_type == "GAP_IGNITION":
-        bos_level = prev_close * 1.032
-        entry_ref = curr_close
-        raw_stop = max(curr_low - 0.2 * atr14_daily, entry_ref - 1.5 * atr14_daily)
-        effective_stop = max(min(raw_stop, entry_ref * 0.975), entry_ref * 0.935)
-        risk_unit = entry_ref - effective_stop
-        target_price = entry_ref + (2.5 * risk_unit)
-
     else:
-        # Standard Momentum Trend Swing (Fixed 5-day high trigger, never overwritten by curr_close)
-        bos_level = high_5d_prev if (high_5d_prev - curr_close) / curr_close <= 0.04 else float(np.max(high_arr[-3:]))
+        high_5d_prev = float(np.max(high_arr[-6:-1])) if n >= 7 else curr_close
+        if curr_close >= high_5d_prev:
+            bos_level = curr_close
+        elif (high_5d_prev - curr_close) / curr_close <= 0.035:
+            bos_level = high_5d_prev
+        else:
+            bos_level = float(np.max(high_arr[-3:]))
+
         entry_ref = curr_close if curr_close >= bos_level else bos_level
         atr_stop = entry_ref - (1.5 * atr14_daily)
         ema_stop = min(ema20, entry_ref) - (0.5 * atr14_daily)
         raw_stop = max(atr_stop, ema_stop)
-        effective_stop = max(min(raw_stop, entry_ref * 0.978), entry_ref * 0.935)
+        effective_stop = min(raw_stop, entry_ref * 0.978)
+        effective_stop = max(effective_stop, entry_ref * 0.935)
+
         risk_unit = entry_ref - effective_stop
         target_price = entry_ref + (2.5 * risk_unit)
+        tap3_price = float(np.min(low_arr[-10:]))
 
-    tap3_price = tap3_price if tap3_price else float(np.min(low_arr[-10:]))
     risk_per_share = max(entry_ref - effective_stop, 0.0001)
     reward_per_share = max(target_price - entry_ref, 0.0)
     r_multiple = reward_per_share / risk_per_share
@@ -1019,97 +831,53 @@ def analyze_multi_playbook(df, account_size=100000, spy_ret_63d=0.0, df_1h=None,
     target_gain_pct = ((target_price - entry_ref) / entry_ref) * 100.0
     stop_loss_pct = ((effective_stop - entry_ref) / entry_ref) * 100.0
 
-    # --- DETERMINE PLAIN-ENGLISH ACTION VERDICT ---
-    crossed_bos_today = (curr_close >= bos_level) and (prev_close < bos_level * 1.008)
+    just_crossed_bos = (curr_close >= bos_level) and (prev_close < bos_level * 1.012)
 
-    if swing_type == "TCT_BOTTOM" and curr_close >= bos_level and r_multiple >= 2.0:
+    if tct_valid_range and curr_close >= bos_level and r_multiple >= 2.0:
         action_signal = "BUY NOW (TCT BOS)"
         action_badge = "badge-tct-buy"
         action_dot = "🟢"
-        short_sig = "🟢 TCT Buy"
+        short_sig = "🟢 Buy Now"
         action_explain = f"TCT accumulation breakout above BOS (${bos_level:,.2f}) targeting Range High (${target_price:,.2f})."
         action_priority = 0
-    elif swing_type == "EMA20_PULLBACK" and (curr_close >= curr_open or curr_close >= prev_close):
-        action_signal = "SWING BUY (20-EMA DIP)"
-        action_badge = "badge-tct-buy"
-        action_dot = "🎯"
-        short_sig = "🎯 Pullback"
-        action_explain = f"Holy Grail 20-EMA pullback bounce in strong uptrend (ADX {adx_val:.0f}). Target ${target_price:,.2f} ({r_multiple:.1f}R)."
-        action_priority = 0
-    elif swing_type == "VOL_SQUEEZE" and curr_close >= bos_level * 0.998:
-        action_signal = "SWING BUY (SQUEEZE)"
-        action_badge = "badge-tct-buy"
-        action_dot = "⚡"
-        short_sig = "⚡ Squeeze"
-        action_explain = f"Breaking out of tight {coil_5d_pct:.1f}% volatility squeeze above ${bos_level:,.2f}. Target ${target_price:,.2f} ({r_multiple:.1f}R)."
-        action_priority = 0
-    elif swing_type == "RSI2_BOUNCE" and (curr_close >= curr_open or rsi2 <= 12.0):
-        action_signal = "SWING BUY (OVERSOLD)"
-        action_badge = "badge-tct-buy"
-        action_dot = "🪃"
-        short_sig = "🪃 Snapback"
-        action_explain = f"RSI-2 deeply oversold ({rsi2:.0f}) above 200-EMA. Mean-reversion target ${target_price:,.2f}."
-        action_priority = 0
-    elif swing_type == "GAP_IGNITION":
-        action_signal = "SWING BUY (IGNITION)"
-        action_badge = "badge-tct-buy"
-        action_dot = "🔥"
-        short_sig = "🔥 Ignition"
-        action_explain = f"High-volume catalyst surge ({paced_rvol:.1f}x Vol pace). Target ${target_price:,.2f}, stop ${effective_stop:,.2f}."
-        action_priority = 0
-    elif swing_type == "MOMENTUM" and curr_close > ema50 and curr_close > ema20 and crossed_bos_today and r_multiple >= 2.0:
-        action_signal = "BUY NOW (BREAKOUT)"
-        action_badge = "badge-tct-buy"
-        action_dot = "🟢"
-        short_sig = "🟢 Buy Now"
-        action_explain = f"Momentum breakout above 5D high (${bos_level:,.2f}) with {r_multiple:.1f}R target at ${target_price:,.2f}."
-        action_priority = 0
-    elif swing_type == "TCT_BOTTOM" and curr_close < bos_level:
+    elif tct_valid_range and curr_close < bos_level:
         action_signal = "WATCHING TCT BOX"
         action_badge = "badge-tct-watch"
         action_dot = "📐"
         short_sig = "📐 TCT Box"
-        action_explain = f"Valid 25+ bar TCT bottom box. Buy when price closes above BOS ${bos_level:,.2f}."
+        action_explain = f"Valid 25+ bar TCT bottom box formed. Buy if price closes above BOS ${bos_level:,.2f}."
         action_priority = 1
-    elif swing_type == "VOL_SQUEEZE" and curr_close < bos_level:
-        action_signal = "COILING (WATCH SQUEEZE)"
-        action_badge = "badge-tct-watch"
-        action_dot = "⚡"
-        short_sig = "⚡ Coiling"
-        action_explain = f"Tight {coil_5d_pct:.1f}% volatility squeeze. Buy on breakout above ${bos_level:,.2f}."
-        action_priority = 1
+    elif not tct_valid_range and curr_close > ema50 and curr_close > ema20 and just_crossed_bos and r_multiple >= 2.0:
+        action_signal = "BUY NOW (MOMENTUM)"
+        action_badge = "badge-tct-buy"
+        action_dot = "🟢"
+        short_sig = "🟢 Buy Now"
+        action_explain = f"Uptrend breakout above ${bos_level:,.2f} with {r_multiple:.1f}R swing target at ${target_price:,.2f}."
+        action_priority = 0
     elif curr_close > ema50 and curr_close >= ema20 * 0.99:
-        action_signal = "HOLD / RIDE TREND"
+        action_signal = "HOLD / BUY DIP"
         action_badge = "badge-trend"
         action_dot = "🔵"
         short_sig = "🔵 Uptrend"
-        action_explain = f"Holding above 20 & 50 EMA. Swing target ${target_price:,.2f}, trailing stop ${effective_stop:,.2f}."
+        action_explain = f"Strong uptrend above 20 & 50 EMA. Swing target ${target_price:,.2f}, trailing stop ${effective_stop:,.2f}."
         action_priority = 2
-    elif curr_close < ema50 and not tct_valid_range and not is_rsi2_snapback:
+    elif curr_close < ema50 and not tct_valid_range:
         action_signal = "SELL / AVOID"
         action_badge = "badge-tct-sell"
         action_dot = "🔴"
         short_sig = "🔴 Below 50"
-        action_explain = f"Below 50-day EMA (${ema50:,.2f}) without an active bottoming or snapback setup."
+        action_explain = f"Below 50-day EMA (${ema50:,.2f}) without a valid TCT bottom box. Protect capital."
         action_priority = 4
     else:
         action_signal = "WAIT FOR TRIGGER"
         action_badge = "badge-candidate"
         action_dot = "🟡"
         short_sig = "🟡 Wait"
-        action_explain = f"Consolidating. Wait for a move above ${bos_level:,.2f} before entering."
+        action_explain = f"Consolidating. Wait for a clean move above ${bos_level:,.2f} before entering."
         action_priority = 3
 
     return {
         "TCT_Valid_Range": tct_valid_range,
-        "Swing_Type": swing_type,
-        "Is_EMA20_Pullback": is_ema20_pullback,
-        "Is_Squeeze_Coil": is_squeeze_coil,
-        "Is_RSI2_Snapback": is_rsi2_snapback,
-        "Is_Gap_Ignition": is_gap_ignition,
-        "RSI2": rsi2,
-        "ADX": adx_val,
-        "Paced_RVOL": paced_rvol,
         "TCT_Model": playbook_name,
         "TCT_Slow_25": slow_decline_25 and no_vertical_flush,
         "TCT_Liq_50M": liq_pass,
@@ -1138,7 +906,7 @@ def analyze_multi_playbook(df, account_size=100000, spy_ret_63d=0.0, df_1h=None,
     }
 
 
-# --- DATA ENGINE 1: BATCH INGESTION (WITH 8:00 AM HKT SETTLEMENT PATCH) ---
+# --- DATA ENGINE 1: BATCH INGESTION (INCLUDES DAY HIGH, DAY LOW & AUTO-REFRESH BUCKET) ---
 @st.cache_data(ttl=120)
 def fetch_batch_market_data(tickers, account_size=100000, refresh_bucket=0):
     if not tickers:
@@ -1150,24 +918,9 @@ def fetch_batch_market_data(tickers, account_size=100000, refresh_bucket=0):
     except Exception:
         return {}
 
-    expected_us_date, vol_pace = get_expected_us_session_date_and_pace()
-
-    # Check if Yahoo's 1d endpoint dropped the latest US trading day (8:00 AM HKT settlement glitch)
-    data_1h_patch = None
-    try:
-        sample_df = data["^GSPC"].dropna(subset=["Close"]) if len(download_list) > 1 and "^GSPC" in data.columns.levels[0] else data.dropna(subset=["Close"])
-        if not sample_df.empty:
-            last_daily_dt = pd.to_datetime(sample_df.index[-1]).date()
-            if last_daily_dt < expected_us_date:
-                data_1h_patch = yf.download(download_list, period="5d", interval="1h", group_by="ticker", progress=False)
-    except Exception:
-        pass
-
     spy_ret_63d = 0.0
     try:
-        spy_df = data["^GSPC"].dropna(subset=["Close"]) if len(download_list) > 1 and "^GSPC" in data.columns.levels[0] else pd.DataFrame()
-        if data_1h_patch is not None and "^GSPC" in data_1h_patch.columns.levels[0]:
-            spy_df = patch_df_with_1h_session(spy_df, data_1h_patch["^GSPC"])
+        spy_df = data["^GSPC"].dropna() if len(download_list) > 1 and "^GSPC" in data.columns.levels[0] else pd.DataFrame()
         if len(spy_df) >= 64:
             spy_ret_63d = ((float(spy_df["Close"].iloc[-1]) - float(spy_df["Close"].iloc[-64])) / float(spy_df["Close"].iloc[-64])) * 100.0
     except Exception:
@@ -1188,10 +941,6 @@ def fetch_batch_market_data(tickers, account_size=100000, refresh_bucket=0):
                     continue
 
             df.dropna(subset=["Close", "High", "Low"], inplace=True)
-            if data_1h_patch is not None:
-                sub_1h = data_1h_patch[t] if len(download_list) > 1 and t in data_1h_patch.columns.levels[0] else data_1h_patch
-                df = patch_df_with_1h_session(df, sub_1h)
-
             if len(df) < 30:
                 continue
 
@@ -1229,9 +978,8 @@ def fetch_batch_market_data(tickers, account_size=100000, refresh_bucket=0):
             macd_above_zero = float(df["MACD"].iloc[-1]) > 0
             macd_cross = float(df["MACD"].iloc[-1]) > float(df["MACD_Signal"].iloc[-1])
 
-            vol20 = float(df["Vol20"].iloc[-2]) if len(df) >= 22 and not np.isnan(df["Vol20"].iloc[-2]) else float(df["Vol20"].iloc[-1])
-            paced_vol = float(df["Volume"].iloc[-1]) / max(vol_pace, 0.08)
-            rvol = float(paced_vol / vol20) if vol20 > 0 else 1.0
+            vol20 = float(df["Vol20"].iloc[-1]) if not np.isnan(df["Vol20"].iloc[-1]) else 0.0
+            rvol = float(df["Volume"].iloc[-1] / vol20) if vol20 > 0 else 1.0
             high20_prev = float(df["High20"].iloc[-2]) if len(df) >= 22 else close
             is_breakout = (close >= high20_prev) and (rvol >= 1.3)
             bb_upper_break = close >= float(df["BB_Upper"].iloc[-1])
@@ -1244,7 +992,7 @@ def fetch_batch_market_data(tickers, account_size=100000, refresh_bucket=0):
             within_52w = (close / float(df["High52"].iloc[-1])) >= 0.90 if float(df["High52"].iloc[-1]) > 0 else False
 
             if is_breakout and above_ema50:
-                state, badge_class, reason = "Confirmed Breakout", "badge-breakout", f"Cleared 20D high (${high20_prev:,.2f}) on {rvol:.1f}x volume pace"
+                state, badge_class, reason = "Confirmed Breakout", "badge-breakout", f"Closed above 20D high (${high20_prev:,.2f}) with {rvol:.1f}x volume"
             elif above_ema50 and close > ema20_val:
                 state, badge_class, reason = "Active Trend", "badge-trend", "Holding steadily above 20-day & 50-day EMA support"
             elif close < ema50_val:
@@ -1257,7 +1005,7 @@ def fetch_batch_market_data(tickers, account_size=100000, refresh_bucket=0):
             fund_score = 80
             composite = int((fund_score * w_fund) + (tech_score * w_tech) + (mom_score * w_mom))
 
-            tct_info = analyze_multi_playbook(df, account_size=account_size, spy_ret_63d=spy_ret_63d, vol_pace=vol_pace)
+            tct_info = analyze_dual_playbook(df, account_size=account_size, spy_ret_63d=spy_ret_63d)
 
             record = {
                 "Ticker": t, "Price": close, "Change": change, "Change_Pct": change_pct,
@@ -1277,7 +1025,7 @@ def fetch_batch_market_data(tickers, account_size=100000, refresh_bucket=0):
     return results
 
 
-# --- DATA ENGINE 2: ISOLATED SINGLE-TICKER ENGINE (WITH 8:00 AM HKT PATCH) ---
+# --- DATA ENGINE 2: ISOLATED SINGLE-TICKER ENGINE ---
 @st.cache_data(ttl=180)
 def fetch_single_ticker_data(sym, account_size=100000):
     try:
@@ -1289,9 +1037,6 @@ def fetch_single_ticker_data(sym, account_size=100000):
             df_1h = t.history(period="1mo", interval="1h")
         except Exception:
             df_1h = None
-
-        df = patch_df_with_1h_session(df, df_1h)
-        _, vol_pace = get_expected_us_session_date_and_pace()
 
         close = float(df["Close"].iloc[-1])
         prev_close = float(df["Close"].iloc[-2]) if len(df) >= 2 else close
@@ -1321,15 +1066,15 @@ def fetch_single_ticker_data(sym, account_size=100000):
         df["MACD_Signal"] = df["MACD"].ewm(span=9, adjust=False).mean()
         df["MACD_Hist"] = df["MACD"] - df["MACD_Signal"]
 
-        vol20 = float(df["Vol20"].iloc[-2]) if len(df) >= 22 and float(df["Vol20"].iloc[-2]) > 0 else 1.0
-        rvol = (float(df["Volume"].iloc[-1]) / max(vol_pace, 0.08)) / vol20
+        vol20 = float(df["Vol20"].iloc[-1]) if float(df["Vol20"].iloc[-1]) > 0 else 1.0
+        rvol = float(df["Volume"].iloc[-1]) / vol20
         high20_prev = float(df["High"].rolling(20).max().iloc[-2]) if len(df) >= 22 else close
         is_breakout = (close >= high20_prev) and (rvol >= 1.3)
         above_ema50 = close > float(df["EMA50"].iloc[-1])
 
         if is_breakout and above_ema50:
             state, badge_class = "Confirmed Breakout", "badge-breakout"
-            reason = f"Cleared 20D high (${high20_prev:,.2f}) on {rvol:.1f}x volume pace"
+            reason = f"Closed above 20D high (${high20_prev:,.2f}) with {rvol:.1f}x volume"
         elif above_ema50 and close > float(df["EMA20"].iloc[-1]):
             state, badge_class = "Active Trend", "badge-trend"
             reason = "Holding steadily above 20-day & 50-day EMA support"
@@ -1348,7 +1093,7 @@ def fetch_single_ticker_data(sym, account_size=100000):
         fund_score = 80
         composite = int((fund_score * w_fund) + (tech_score * w_tech) + (mom_score * w_mom))
 
-        tct_info = analyze_multi_playbook(df, account_size=account_size, df_1h=df_1h, vol_pace=vol_pace)
+        tct_info = analyze_dual_playbook(df, account_size=account_size, df_1h=df_1h)
 
         rec = {
             "Ticker": sym, "Price": close, "Change": change, "Change_Pct": change_pct,
@@ -1488,7 +1233,7 @@ def fetch_macro_and_regime():
     ticks = list(MACRO_SYMBOLS.values())
     out = {}
     regime = {
-        "label": "🟢 MARKET REGIME: BULLISH — S&P 500 Holding Trend · Favorable for Swing & TCT Setups",
+        "label": "🟢 MARKET REGIME: BULLISH — S&P 500 Holding Trend · Favorable for New Setups",
         "bg": "#dcfce7", "border": "#86efac", "color": "#14532d"
     }
     try:
@@ -1511,17 +1256,17 @@ def fetch_macro_and_regime():
                 vix_c = out.get("VIX", (18.0, 0, 0))[0]
                 if sp_c > sp_ema50 and sp_c > sp_ema20 and vix_c < 21.0:
                     regime = {
-                        "label": f"🟢 MARKET REGIME: BULLISH (S&P 500 Above 20 & 50 EMA · VIX {vix_c:.1f}) — Green Light for Swing, TCT & Momentum Buys",
+                        "label": f"🟢 MARKET REGIME: BULLISH (S&P 500 Above 20 & 50 EMA · VIX {vix_c:.1f}) — Green Light for TCT & Momentum Buys",
                         "bg": "#dcfce7", "border": "#86efac", "color": "#14532d"
                     }
                 elif sp_c < sp_ema50 or vix_c >= 25.0:
                     regime = {
-                        "label": f"🔴 MARKET REGIME: RISK-OFF / CORRECTION (S&P Below 50 EMA or VIX Elevated at {vix_c:.1f}) — Protect Capital, Favor Oversold Bounce or Cash",
+                        "label": f"🔴 MARKET REGIME: RISK-OFF / CORRECTION (S&P Below 50 EMA or VIX Elevated at {vix_c:.1f}) — Protect Capital, Avoid Aggressive New Buys",
                         "bg": "#fee2e2", "border": "#fca5a5", "color": "#7f1d1d"
                     }
                 else:
                     regime = {
-                        "label": f"🟡 MARKET REGIME: CHOPPY / CAUTION (S&P Consolidating · VIX {vix_c:.1f}) — Favor 20-EMA Pullbacks & Tight Volatility Squeezes",
+                        "label": f"🟡 MARKET REGIME: CHOPPY / CAUTION (S&P Consolidating · VIX {vix_c:.1f}) — Be Selective, Demand Strict ≥2.5R Setups",
                         "bg": "#fef9c3", "border": "#fde047", "color": "#713f12"
                     }
     except Exception:
@@ -1533,7 +1278,7 @@ def fetch_macro_and_regime():
 # 1. PRIMARY SIDEBAR NAVIGATION
 # ==============================================================================
 st.sidebar.markdown(
-    """<div style="padding: 10px 0 20px 0;"><span style="display: inline-block; width: 9px; height: 9px; background: #22c55e; border-radius: 50%; margin-right: 6px;"></span><span style="font-size: 0.85rem; font-weight: 600; letter-spacing: 0.05em; color: #a1a1aa;">6-PLAYBOOK ENGINE</span><h2 style="color: #f4efe6 !important; margin: 6px 0 0 0; font-size: 1.4rem;">Ledger</h2><span style="font-size: 0.75rem; color: #c5a059; text-transform: uppercase; letter-spacing: 0.1em; font-weight: 600;">Swing · TCT · Momentum v11.0</span></div>""", 
+    """<div style="padding: 10px 0 20px 0;"><span style="display: inline-block; width: 9px; height: 9px; background: #22c55e; border-radius: 50%; margin-right: 6px;"></span><span style="font-size: 0.85rem; font-weight: 600; letter-spacing: 0.05em; color: #a1a1aa;">LIVE + 15M RESEARCH</span><h2 style="color: #f4efe6 !important; margin: 6px 0 0 0; font-size: 1.4rem;">Ledger</h2><span style="font-size: 0.75rem; color: #c5a059; text-transform: uppercase; letter-spacing: 0.1em; font-weight: 600;">Momentum & TCT v10.3</span></div>""", 
     unsafe_allow_html=True
 )
 
@@ -1593,7 +1338,7 @@ if st.session_state.inspect_symbol is not None:
             st.rerun()
 
     with col_title:
-        st.markdown(f"<h1>{sym} · Swing, TCT & Fundamental Dossier</h1>", unsafe_allow_html=True)
+        st.markdown(f"<h1>{sym} · Technical, TCT & Fundamental Dossier</h1>", unsafe_allow_html=True)
 
     d = fetch_single_ticker_data(sym, account_size=settings["account_size"])
     funds = fetch_ticker_fundamentals(sym)
@@ -1607,7 +1352,7 @@ if st.session_state.inspect_symbol is not None:
         
         f1.metric("Price", f"${d['Price']:,.2f}", f"{'+' if d['Change']>=0 else ''}{d['Change_Pct']:.2f}%")
         f2.metric("Action Signal", d["TCT_Action"])
-        f3.metric("Buy Trigger", f"${d['BOS_Level']:,.2f}")
+        f3.metric("Buy Trigger (BOS)", f"${d['BOS_Level']:,.2f}")
         f4.metric("Take Profit Target", f"${d['Target_Price']:,.2f}", f"+{d['Target_Pct']:.1f}%")
         f5.metric("Safety Stop-Loss", f"${d['Stop_Price']:,.2f}", f"{d['Stop_Pct']:.1f}%", delta_color="inverse")
         f6.metric("0.5% Risk Size", f"{d['Shares_05Pct']} shs", f"{d['R_Multiple']:.1f}R Reward/Risk")
@@ -1624,15 +1369,14 @@ if st.session_state.inspect_symbol is not None:
             show_bb = st.checkbox("Bollinger Bands (20, 2)", value=False)
 
             st.markdown("---")
-            st.markdown("### 6-Playbook Trade Ticket")
-            st.markdown(f"**Active Playbook:** `{d['TCT_Model']}`")
+            st.markdown("### Action Trade Ticket")
+            st.markdown(f"**Playbook:** `{d['TCT_Model']}`")
             st.markdown(f"**Action:** `{d['TCT_Action']}`")
             st.markdown(f"**Buy Trigger:** `${d['BOS_Level']:,.2f}`")
             st.markdown(f"**Profit Target:** `${d['Target_Price']:,.2f}` (+{d['Target_Pct']:.1f}%)")
             st.markdown(f"**Stop-Loss:** `${d['Stop_Price']:,.2f}` ({d['Stop_Pct']:.1f}%)")
             st.markdown(f"**Reward/Risk:** `{d['R_Multiple']:.2f}R` ({'Pass ≥2R' if d['TCT_2R_Pass'] else 'Below 2R'})")
             st.markdown(f"**Suggested Shares:** `{d['Shares_05Pct']} shares` (${d['Pos_Value']:,.0f})")
-            st.markdown(f"**RSI(14) / RSI(2):** `{d['RSI']:.1f}` / `{d['RSI2']:.0f}` | **ADX:** `{d['ADX']:.0f}`")
             st.markdown(f"*{d['TCT_Explain']}*")
 
             st.markdown("---")
@@ -1706,7 +1450,7 @@ else:
                                 {'+' if best_pick['Change'] >= 0 else ''}{best_pick['Change_Pct']:.2f}%
                             </span>
                             <div style="color: #cbd5e1; font-size: 0.90rem; margin-top: 6px;">
-                                <b>Buy Trigger:</b> ${best_pick['BOS_Level']:,.2f} · <b>Take Profit:</b> ${best_pick['Target_Price']:,.2f} (+{best_pick['Target_Pct']:.1f}\%) · <b>Stop-Loss:</b>${best_pick['Stop_Price']:,.2f} ({best_pick['Stop_Pct']:.1f}%) · <b>Size (0.5% Risk):</b> {best_pick['Shares_05Pct']} shs ({best_pick['R_Multiple']:.1f}R)
+                                <b>Buy Trigger:</b> ${best_pick['BOS_Level']:,.2f} · <b>Take Profit:</b> ${best_pick['Target_Price']:,.2f} (+{best_pick['Target_Pct']:.1f}%) · <b>Stop-Loss:</b> ${best_pick['Stop_Price']:,.2f} ({best_pick['Stop_Pct']:.1f}%) · <b>Size (0.5% Risk):</b> {best_pick['Shares_05Pct']} shs ({best_pick['R_Multiple']:.1f}R)
                             </div>
                         </div>
                         <div style="text-align: right;">
@@ -1788,6 +1532,7 @@ else:
                 )
 
     elif navigation == "⚡ Live Real-Time Quotes":
+        # RELAXED TOP MARGIN: Prevents top pull-down menus from being cut off while keeping full-screen width
         st.markdown("""
         <style>
         .block-container {
@@ -1802,6 +1547,7 @@ else:
         folder_names = list(watchlists.keys())
         folder_options = folder_names + ["All Watchlists Combined"]
 
+        # Slim Single-Row Control Bar at the top (Added Mode Switcher & Auto-Refresh Timer)
         ctrl1, ctrl2, ctrl3, ctrl4, ctrl5, ctrl6, ctrl7 = st.columns([1.8, 1.9, 1.9, 1.3, 1.3, 0.8, 1.1])
         with ctrl1:
             selected_live_folder = st.selectbox("Watchlist", folder_options, index=0, label_visibility="collapsed")
@@ -1875,10 +1621,12 @@ else:
         run_every_sec = refresh_interval_map.get(auto_refresh_choice, None)
 
         def render_live_watchboard_content():
+            # When auto-refresh is enabled, advance the cache bucket every N seconds so yfinance pulls fresh quotes
             bucket = int(time.time() // run_every_sec) if run_every_sec else int(time.time() // 120)
             live_records = fetch_batch_market_data(active_live_syms, account_size=settings["account_size"], refresh_bucket=bucket)
 
             ordered_syms = [s for s in active_live_syms if s in live_records]
+            # Append any symbols that might not have returned batch history so TradingView mode still shows them
             missing_syms = [s for s in active_live_syms if s not in live_records]
 
             if live_sort == "Rank: 🟢 Action Signal (Buy First)":
@@ -1937,6 +1685,7 @@ else:
                     st.info("No symbols found in this watchlist. Use the box above or '✏️ Edit List' to add stocks.")
 
             else:
+                # MODE 2: TRADINGVIEW LIVE STREAMING MODE (2-COLUMN SIDE-BY-SIDE WIDGETS + TICKER TAPE)
                 tv_all_syms = ordered_syms + missing_syms
                 if tv_all_syms:
                     tape_symbols = [
@@ -2006,6 +1755,7 @@ else:
                             </div>
                             """, height=widget_height + 10)
 
+                    # Quick-tap pills so Option A Bottom Live Chart & Full Dossier work in TradingView Mode too
                     pills_bar = "".join([
                         f'<a href="?rt_chart={s}" target="_self" class="pill" title="Open Bottom Live Chart">{live_records[s]["TCT_Dot"] if s in live_records else "📈"} {s}</a>'
                         for s in tv_all_syms
@@ -2014,6 +1764,7 @@ else:
                 else:
                     st.info("No symbols in this watchlist.")
 
+        # Use Streamlit Fragment if auto-refresh timer is active
         if run_every_sec and hasattr(st, "fragment"):
             @st.fragment(run_every=run_every_sec)
             def _auto_refresh_fragment():
@@ -2022,6 +1773,7 @@ else:
         else:
             render_live_watchboard_content()
 
+        # OPTION A: BOTTOM LIVE CHART (ONLY SHOWN WHEN A STOCK SYMBOL IS TAPPED)
         if st.session_state.rt_chart_symbol:
             chart_sym = st.session_state.rt_chart_symbol
             st.markdown("---")
