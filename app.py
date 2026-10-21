@@ -1644,4 +1644,880 @@ if st.session_state.inspect_symbol is not None:
             fig = make_subplots(rows=3, cols=1, shared_xaxes=True, vertical_spacing=0.03, row_heights=[0.62, 0.19, 0.19])
             fig.add_trace(go.Candlestick(x=df_hist.index, open=df_hist['Open'], high=df_hist['High'], low=df_hist['Low'], close=df_hist['Close'], name="Candles"), row=1, col=1)
 
-            if show_ema20
+            if show_ema20:
+                fig.add_trace(go.Scatter(x=df_hist.index, y=df_hist['EMA20'], line=dict(color="#d4af37", width=1.5), name="EMA 20"), row=1, col=1)
+            if show_ema50:
+                fig.add_trace(go.Scatter(x=df_hist.index, y=df_hist['EMA50'], line=dict(color="#15803d", width=1.5), name="EMA 50"), row=1, col=1)
+            if show_ema200:
+                fig.add_trace(go.Scatter(x=df_hist.index, y=df_hist['EMA200'], line=dict(color="#7c3aed", width=1.5), name="EMA 200"), row=1, col=1)
+            if show_bb:
+                fig.add_trace(go.Scatter(x=df_hist.index, y=df_hist['BB_Upper'], line=dict(color="#94a3b8", width=1, dash="dot"), name="BB Upper"), row=1, col=1)
+                fig.add_trace(go.Scatter(x=df_hist.index, y=df_hist['BB_Lower'], line=dict(color="#94a3b8", width=1, dash="dot"), name="BB Lower"), row=1, col=1)
+
+            if show_tct_lines:
+                fig.add_hline(y=d["Target_Price"], line_dash="dash", line_color="#15803d", line_width=1.8, annotation_text=f"TAKE PROFIT TARGET: ${d['Target_Price']:,.2f} (+{d['Target_Pct']:.1f}%)", annotation_position="top left", row=1, col=1)
+                fig.add_hline(y=d["BOS_Level"], line_dash="dot", line_color="#2563eb", line_width=1.6, annotation_text=f"BUY TRIGGER: ${d['BOS_Level']:,.2f}", annotation_position="bottom left", row=1, col=1)
+                fig.add_hline(y=d["Stop_Price"], line_dash="dash", line_color="#b91c1c", line_width=1.8, annotation_text=f"STOP-LOSS (EXIT): ${d['Stop_Price']:,.2f} ({d['Stop_Pct']:.1f}%)", annotation_position="bottom right", row=1, col=1)
+
+            vol_colors = ['#15803d' if c >= o else '#b91c1c' for c, o in zip(df_hist['Close'], df_hist['Open'])]
+            fig.add_trace(go.Bar(x=df_hist.index, y=df_hist['Volume'], marker_color=vol_colors, name="Volume"), row=2, col=1)
+
+            fig.add_trace(go.Scatter(x=df_hist.index, y=df_hist['MACD'], line=dict(color="#2563eb", width=1.2), name="MACD"), row=3, col=1)
+            fig.add_trace(go.Scatter(x=df_hist.index, y=df_hist['MACD_Signal'], line=dict(color="#ea580c", width=1.2), name="Signal"), row=3, col=1)
+            fig.add_trace(go.Bar(x=df_hist.index, y=df_hist['MACD_Hist'], marker_color="#cbd5e1", name="Histogram"), row=3, col=1)
+
+            fig.update_layout(height=650, margin=dict(l=0, r=0, t=10, b=0), paper_bgcolor="white", plot_bgcolor="white", xaxis_rangeslider_visible=False)
+            st.plotly_chart(fig, use_container_width=True)
+
+        st.markdown("### Verified Recent Headlines (Last 72 Hours)")
+        sym_news = _fetch_rss_raw(f'"{sym}" stock when:3d', max_per_query=8, ticker_tag=sym, max_age_hours=settings["max_news_age_hours"])
+        if sym_news:
+            for a in sym_news:
+                st.markdown(f'- **[{a["age"]}]** <a href="{a["link"]}" target="_blank" style="color:#0f291e; font-weight:600;">{a["title"]}</a> *({a["publisher"]} · {a["date"]})*', unsafe_allow_html=True)
+        else:
+            st.caption("No verified headlines in the past 72 hours.")
+
+        st.markdown("### Profile Summary")
+        st.write(funds.get("Business Summary", "No business overview provided."))
+    else:
+        st.error(f"Unable to retrieve historical chart data for {sym}. Please verify the ticker.")
+
+else:
+    if navigation == "Dashboard":
+        st.markdown("<h1>Market Cockpit</h1>", unsafe_allow_html=True)
+        st.markdown("<p style='color: #52525b; margin-top: -12px;'>Tap any stock symbol to open its interactive chart & Dual-Playbook Trade Ticket.</p>", unsafe_allow_html=True)
+
+        all_monitored = get_all_monitored_tickers()
+        stock_records = fetch_batch_market_data(all_monitored, account_size=settings["account_size"])
+
+        if stock_records:
+            best_pick = max(stock_records.values(), key=lambda x: (100 if x["TCT_Priority"] == 0 else 0) + (15 if x["RS_Leader"] else 0) + x["Score"])
+            st.markdown(
+                f"""
+                <div style="background-color: #0f291e; border-radius: 10px; padding: 20px 24px; color: #fbf9f4; margin-bottom: 20px;">
+                    <div style="font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.12em; color: #c5a059; font-weight: 700;">
+                        TODAY'S STANDOUT SETUP · {best_pick['TCT_Action']} · {best_pick['TCT_Model']}
+                    </div>
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 6px;">
+                        <div>
+                            <a href="?inspect={best_pick['Ticker']}" target="_self" class="hero-ticker-link">📊 {best_pick['Ticker']}</a>
+                            <span style="font-size: 1.2rem; color: #e2e8f0; margin-left: 10px;">${best_pick['Price']:,.2f}</span>
+                            <span style="color: {'#4ade80' if best_pick['Change'] >= 0 else '#f87171'}; font-weight: 600; margin-left: 6px;">
+                                {'+' if best_pick['Change'] >= 0 else ''}{best_pick['Change_Pct']:.2f}%
+                            </span>
+                            <div style="color: #cbd5e1; font-size: 0.90rem; margin-top: 6px;">
+                                <b>Buy Trigger:</b> ${best_pick['BOS_Level']:,.2f} · <b>Take Profit:</b> ${best_pick['Target_Price']:,.2f} (+{best_pick['Target_Pct']:.1f}\%) · <b>Stop-Loss:</b>${best_pick['Stop_Price']:,.2f} ({best_pick['Stop_Pct']:.1f}%) · <b>Size (0.5% Risk):</b> {best_pick['Shares_05Pct']} shs ({best_pick['R_Multiple']:.1f}R)
+                            </div>
+                        </div>
+                        <div style="text-align: right;">
+                            <div style="font-size: 2.2rem; font-weight: 700; color: #c5a059; font-family: 'Newsreader', serif;">
+                                {best_pick['Score']}
+                            </div>
+                            <div style="font-size: 0.70rem; color: #94a3b8; text-transform: uppercase;">Composite Score</div>
+                        </div>
+                    </div>
+                </div>
+                """, unsafe_allow_html=True
+            )
+
+        col_left, col_right = st.columns([2, 1])
+        with col_left:
+            tab_watch, tab_macro, tab_mcf = st.tabs([
+                f"Watchlist News ({len(all_monitored)} Tickers)",
+                "General Market",
+                "Metals, Crypto & USD"
+            ])
+            
+            with tab_watch:
+                wl_news = fetch_watchlist_news_pool(all_monitored, max_items=settings["news_limit"], max_age_hours=settings["max_news_age_hours"])
+                if wl_news:
+                    st.caption(f"Verified fresh headlines (last {settings['max_news_age_hours']}h only · re-hash blogs blocked). Showing {len(wl_news)} stories.")
+                    news_html = '<div class="scroll-news-box">'
+                    for a in wl_news:
+                        ticker_name = a.get("ticker", "NEWS")
+                        news_html += f'<div style="background: white; border: 1px solid #e7e2d9; border-radius: 8px; padding: 12px 16px; margin-bottom: 8px;"><div style="display: flex; justify-content: space-between; font-size: 0.72rem; color: #71717a;"><span style="font-weight: 600;"><span class="ticker-news-badge">[{ticker_name}]</span> {a["publisher"]}<span class="age-badge">{a["age"]}</span></span><span>{a["date"]}</span></div><div style="font-weight: 600; font-size: 0.92rem; margin-top: 4px;"><a href="{a["link"]}" target="_blank" style="color: #0f291e; text-decoration: none;">{a["title"]}</a></div></div>'
+                    news_html += '</div>'
+                    st.markdown(news_html, unsafe_allow_html=True)
+                else:
+                    st.info("No verified fresh news in the past 72 hours for your tracked stocks.")
+
+            with tab_macro:
+                market_news = fetch_google_news_rss("US stock market news", max_items=settings["news_limit"], max_age_hours=settings["max_news_age_hours"])
+                if market_news:
+                    st.caption(f"Verified fresh market stories (last {settings['max_news_age_hours']}h only). Showing {len(market_news)} stories.")
+                    m_news_html = '<div class="scroll-news-box">'
+                    for n in market_news:
+                        m_news_html += f'<div style="background: white; border: 1px solid #e7e2d9; border-radius: 8px; padding: 12px 16px; margin-bottom: 8px;"><div style="display: flex; justify-content: space-between; font-size: 0.72rem; color: #71717a;"><span style="font-weight: 600;">{n["publisher"]}<span class="age-badge">{n["age"]}</span></span><span>{n["date"]}</span></div><div style="font-weight: 600; font-size: 0.92rem; margin-top: 3px;"><a href="{n["link"]}" target="_blank" style="color: #0f291e; text-decoration: none;">{n["title"]}</a></div></div>'
+                    m_news_html += '</div>'
+                    st.markdown(m_news_html, unsafe_allow_html=True)
+                else:
+                    st.info("Market headlines feed refreshing.")
+
+            with tab_mcf:
+                mcf_news = fetch_metals_crypto_fx_news(max_items=settings["news_limit"], max_age_hours=settings["max_news_age_hours"])
+                if mcf_news:
+                    st.caption(f"Verified fresh Precious Metals, Crypto & USD stories (last {settings['max_news_age_hours']}h).")
+                    c_news_html = '<div class="scroll-news-box">'
+                    for a in mcf_news:
+                        c_news_html += f'<div style="background: white; border: 1px solid #e7e2d9; border-radius: 8px; padding: 12px 16px; margin-bottom: 8px;"><div style="display: flex; justify-content: space-between; font-size: 0.72rem; color: #71717a;"><span style="font-weight: 600;"><span class="ticker-news-badge">[{a["ticker"]}]</span> {a["publisher"]}<span class="age-badge">{a["age"]}</span></span><span>{a["date"]}</span></div><div style="font-weight: 600; font-size: 0.92rem; margin-top: 4px;"><a href="{a["link"]}" target="_blank" style="color: #0f291e; text-decoration: none;">{a["title"]}</a></div></div>'
+                    c_news_html += '</div>'
+                    st.markdown(c_news_html, unsafe_allow_html=True)
+
+        with col_right:
+            st.subheader("Action Signals Snapshot")
+            sorted_snap = sorted(stock_records.values(), key=lambda x: (x["TCT_Priority"], -x["Score"]))
+            for r in sorted_snap[:9]:
+                rs_tag = f'<span class="badge badge-rs-lead" style="margin-left:4px;">🔥 RS +{r["RS_Diff"]:.0f}%</span>' if r["RS_Leader"] else ""
+                st.markdown(
+                    f"""
+                    <div style="background: white; border: 1px solid #e7e2d9; border-radius: 8px; padding: 10px 14px; margin-bottom: 8px;">
+                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <div>
+                                <a href="?inspect={r['Ticker']}" target="_self" class="ticker-link" style="font-size: 1.05rem;">📊 {r['Ticker']}</a>
+                                <span class="badge {r['TCT_Badge']}" style="margin-left: 6px; font-size: 0.62rem;">{r['TCT_Action']}</span>{rs_tag}
+                            </div>
+                            <div style="text-align: right;">
+                                <span style="font-weight: 700; font-size: 0.92rem;">${r['Price']:,.2f}</span>
+                            </div>
+                        </div>
+                        <div style="font-size: 0.74rem; color: #52525b; margin-top: 5px;">
+                            Buy: <b>${r['BOS_Level']:,.2f}</b> · Target: <b style="color:#15803d;">${r['Target_Price']:,.2f}</b> (+{r['Target_Pct']:.1f}%) · Stop: <b style="color:#b91c1c;">${r['Stop_Price']:,.2f}</b> ({r['R_Multiple']:.1f}R)
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True
+                )
+
+    elif navigation == "⚡ Live Real-Time Quotes":
+        st.markdown("""
+        <style>
+        .block-container {
+            padding-top: 2.8rem !important;
+            padding-bottom: 1rem !important;
+            padding-left: 1.2rem !important;
+            padding-right: 1.2rem !important;
+        }
+        </style>
+        """, unsafe_allow_html=True)
+
+        folder_names = list(watchlists.keys())
+        folder_options = folder_names + ["All Watchlists Combined"]
+
+        ctrl1, ctrl2, ctrl3, ctrl4, ctrl5, ctrl6, ctrl7 = st.columns([1.8, 1.9, 1.9, 1.3, 1.3, 0.8, 1.1])
+        with ctrl1:
+            selected_live_folder = st.selectbox("Watchlist", folder_options, index=0, label_visibility="collapsed")
+        with ctrl2:
+            live_board_mode = st.selectbox(
+                "Board Mode",
+                [
+                    "📊 Custom Signal Board (Large Font)",
+                    "⚡ TradingView Streaming (Tick-by-Tick)"
+                ],
+                index=0,
+                label_visibility="collapsed"
+            )
+        with ctrl3:
+            live_sort = st.selectbox(
+                "Rank / Sort",
+                [
+                    "Rank: My Saved Order",
+                    "Rank: 🟢 Action Signal (Buy First)",
+                    "Rank: 📈 Day % Change (Gainers)",
+                    "Rank: 📉 Day % Change (Losers)",
+                    "Rank: 🔥 Relative Strength vs S&P",
+                    "Rank: 💯 Composite Score"
+                ],
+                index=0,
+                label_visibility="collapsed"
+            )
+        with ctrl4:
+            auto_refresh_choice = st.selectbox(
+                "Auto-Refresh Timer",
+                [
+                    "⏱️ Auto: Off",
+                    "⏱️ Auto: 15s",
+                    "⏱️ Auto: 30s",
+                    "⏱️ Auto: 60s"
+                ],
+                index=0,
+                label_visibility="collapsed"
+            )
+        with ctrl5:
+            if selected_live_folder != "All Watchlists Combined":
+                quick_add = st.text_input("Quick Add Ticker", placeholder=f"+ Add to {selected_live_folder}", label_visibility="collapsed").upper().strip()
+                if quick_add and quick_add not in watchlists[selected_live_folder]:
+                    watchlists[selected_live_folder].append(quick_add)
+                    sync_watchlists_to_github(watchlists)
+                    st.rerun()
+            else:
+                st.caption("All Combined Lists")
+        with ctrl6:
+            if st.button("🔄", help="Refresh Quotes Now", use_container_width=True):
+                st.cache_data.clear()
+                st.rerun()
+        with ctrl7:
+            edit_mode_live = st.checkbox("✏️ Edit List", value=False)
+
+        if edit_mode_live:
+            target_edit_folder = selected_live_folder if selected_live_folder != "All Watchlists Combined" else folder_names[0]
+            render_watchlist_reorder_panel(target_edit_folder, key_prefix="live_ed")
+
+        if selected_live_folder == "All Watchlists Combined":
+            active_live_syms = get_all_monitored_tickers()
+        else:
+            active_live_syms = list(watchlists.get(selected_live_folder, []))
+
+        refresh_interval_map = {
+            "⏱️ Auto: Off": None,
+            "⏱️ Auto: 15s": 15,
+            "⏱️ Auto: 30s": 30,
+            "⏱️ Auto: 60s": 60
+        }
+        run_every_sec = refresh_interval_map.get(auto_refresh_choice, None)
+
+        def render_live_watchboard_content():
+            bucket = int(time.time() // run_every_sec) if run_every_sec else int(time.time() // 120)
+            live_records = fetch_batch_market_data(active_live_syms, account_size=settings["account_size"], refresh_bucket=bucket)
+
+            ordered_syms = [s for s in active_live_syms if s in live_records]
+            missing_syms = [s for s in active_live_syms if s not in live_records]
+
+            if live_sort == "Rank: 🟢 Action Signal (Buy First)":
+                ordered_syms = sorted(ordered_syms, key=lambda s: (live_records[s]["TCT_Priority"], -live_records[s]["Score"]))
+            elif live_sort == "Rank: 📈 Day % Change (Gainers)":
+                ordered_syms = sorted(ordered_syms, key=lambda s: live_records[s]["Change_Pct"], reverse=True)
+            elif live_sort == "Rank: 📉 Day % Change (Losers)":
+                ordered_syms = sorted(ordered_syms, key=lambda s: live_records[s]["Change_Pct"])
+            elif live_sort == "Rank: 🔥 Relative Strength vs S&P":
+                ordered_syms = sorted(ordered_syms, key=lambda s: live_records[s]["RS_Diff"], reverse=True)
+            elif live_sort == "Rank: 💯 Composite Score":
+                ordered_syms = sorted(ordered_syms, key=lambda s: live_records[s]["Score"], reverse=True)
+
+            if live_board_mode.startswith("📊 Custom Signal Board"):
+                def build_half_table_html(sym_slice):
+                    rows_html = ""
+                    for sym in sym_slice:
+                        d = live_records[sym]
+                        chg = d["Change"]
+                        pct = d["Change_Pct"]
+                        color = "#15803d" if chg >= 0 else "#b91c1c"
+                        sign = "+" if chg >= 0 else "-"
+                        short_sig = d.get("TCT_Short_Sig", "🔵 Uptrend")
+                        rows_html += (
+                            f'<tr>'
+                            f'<td>{short_sig}</td>'
+                            f'<td><a href="?rt_chart={sym}" target="_self" class="rt-sym-link" title="Tap to open live chart below">{sym}</a>'
+                            f'<a href="?inspect={sym}" target="_self" class="rt-dossier-link" title="Open Full TCT Dossier">📋</a></td>'
+                            f'<td style="font-weight:800; color:#18181b;">{d["Price"]:,.2f}</td>'
+                            f'<td style="color:{color}; font-weight:700;">{sign}{abs(chg):.2f} ({ "+" if pct >= 0 else "" }{pct:.2f}%)</td>'
+                            f'<td style="color:#15803d; font-weight:600;">{d["Day_High"]:,.2f}</td>'
+                            f'<td style="color:#b91c1c; font-weight:600;">{d["Day_Low"]:,.2f}</td>'
+                            f'</tr>'
+                        )
+                    return (
+                        f'<table class="live-quote-table">'
+                        f'<thead><tr><th>Signal</th><th>Symbol</th><th>Price</th><th>Day Chg</th><th>High</th><th>Low</th></tr></thead>'
+                        f'<tbody>{rows_html}</tbody></table>'
+                    )
+
+                if ordered_syms:
+                    mid = (len(ordered_syms) + 1) // 2
+                    left_syms = ordered_syms[:mid]
+                    right_syms = ordered_syms[mid:]
+
+                    left_table_html = build_half_table_html(left_syms)
+                    right_table_html = build_half_table_html(right_syms) if right_syms else ""
+
+                    st.markdown(
+                        f'<div class="live-board-grid"><div>{left_table_html}</div><div>{right_table_html}</div></div>',
+                        unsafe_allow_html=True
+                    )
+                    timer_status = f"Auto-refreshing every {run_every_sec}s" if run_every_sec else "Manual refresh mode"
+                    st.caption(f"🟢 Buy Now · 📐 TCT Box · 🔵 Uptrend · 🟡 Wait · 🔴 Below 50 EMA  |  **Tap any Stock Symbol** for Bottom Live Chart · Tap **📋** for Dossier  |  *{timer_status} · Last updated: {datetime.now().strftime('%H:%M:%S')}*")
+                else:
+                    st.info("No symbols found in this watchlist. Use the box above or '✏️ Edit List' to add stocks.")
+
+            else:
+                tv_all_syms = ordered_syms + missing_syms
+                if tv_all_syms:
+                    tape_symbols = [
+                        {"proName": "FOREXCOM:SPXUSD", "title": "S&P 500"},
+                        {"proName": "FOREXCOM:NSXUSD", "title": "Nasdaq 100"},
+                        {"proName": "BITSTAMP:BTCUSD", "title": "Bitcoin"}
+                    ] + [{"proName": s, "title": s} for s in tv_all_syms[:25]]
+
+                    components.html(f"""
+                    <div class="tradingview-widget-container">
+                      <div class="tradingview-widget-container__widget"></div>
+                      <script type="text/javascript" src="https://s3.tradingview.com/external-embedding/embed-widget-ticker-tape.js" async>
+                      {{
+                        "symbols": {json.dumps(tape_symbols)},
+                        "showSymbolLogo": true,
+                        "isTransparent": false,
+                        "displayMode": "compact",
+                        "colorTheme": "light",
+                        "locale": "en"
+                      }}
+                      </script>
+                    </div>
+                    """, height=52)
+
+                    mid = (len(tv_all_syms) + 1) // 2
+                    left_tv = [{"name": s, "displayName": f"{live_records[s]['TCT_Dot']} {s}" if s in live_records else s} for s in tv_all_syms[:mid]]
+                    right_tv = [{"name": s, "displayName": f"{live_records[s]['TCT_Dot']} {s}" if s in live_records else s} for s in tv_all_syms[mid:]]
+                    widget_height = max(420, min(780, mid * 36 + 85))
+
+                    tv_c1, tv_c2 = st.columns(2)
+                    with tv_c1:
+                        left_payload = [{"name": f"{selected_live_folder} (1–{len(left_tv)})", "originalName": "Indices", "symbols": left_tv}]
+                        components.html(f"""
+                        <div class="tradingview-widget-container">
+                          <div class="tradingview-widget-container__widget"></div>
+                          <script type="text/javascript" src="https://s3.tradingview.com/external-embedding/embed-widget-market-quotes.js" async>
+                          {{
+                            "width": "100%",
+                            "height": {widget_height},
+                            "symbolsGroups": {json.dumps(left_payload)},
+                            "showSymbolLogo": true,
+                            "isTransparent": false,
+                            "colorTheme": "light",
+                            "locale": "en"
+                          }}
+                          </script>
+                        </div>
+                        """, height=widget_height + 10)
+
+                    with tv_c2:
+                        if right_tv:
+                            right_payload = [{"name": f"{selected_live_folder} ({mid+1}–{len(tv_all_syms)})", "originalName": "Futures", "symbols": right_tv}]
+                            components.html(f"""
+                            <div class="tradingview-widget-container">
+                              <div class="tradingview-widget-container__widget"></div>
+                              <script type="text/javascript" src="https://s3.tradingview.com/external-embedding/embed-widget-market-quotes.js" async>
+                              {{
+                                "width": "100%",
+                                "height": {widget_height},
+                                "symbolsGroups": {json.dumps(right_payload)},
+                                "showSymbolLogo": true,
+                                "isTransparent": false,
+                                "colorTheme": "light",
+                                "locale": "en"
+                              }}
+                              </script>
+                            </div>
+                            """, height=widget_height + 10)
+
+                    pills_bar = "".join([
+                        f'<a href="?rt_chart={s}" target="_self" class="pill" title="Open Bottom Live Chart">{live_records[s]["TCT_Dot"] if s in live_records else "📈"} {s}</a>'
+                        for s in tv_all_syms
+                    ])
+                    st.markdown(f"<div style='margin-top:4px;'><b>Tap any symbol to open Bottom Live Chart:</b><br>{pills_bar}</div>", unsafe_allow_html=True)
+                else:
+                    st.info("No symbols in this watchlist.")
+
+        if run_every_sec and hasattr(st, "fragment"):
+            @st.fragment(run_every=run_every_sec)
+            def _auto_refresh_fragment():
+                render_live_watchboard_content()
+            _auto_refresh_fragment()
+        else:
+            render_live_watchboard_content()
+
+        if st.session_state.rt_chart_symbol:
+            chart_sym = st.session_state.rt_chart_symbol
+            st.markdown("---")
+            ch_c1, ch_c2, ch_c3, ch_c4 = st.columns([3.5, 2.0, 2.0, 1.5])
+            with ch_c1:
+                st.markdown(f"### 📈 Live Streaming Chart: `{chart_sym}`")
+            with ch_c2:
+                rt_interval = st.selectbox(
+                    "Timeframe",
+                    ["5", "15", "60", "240", "D"],
+                    format_func=lambda x: {"5": "5-Minute", "15": "15-Minute", "60": "1-Hour (BOS)", "240": "4-Hour", "D": "Daily"}[x],
+                    index=2,
+                    label_visibility="collapsed"
+                )
+            with ch_c3:
+                if st.button(f"📋 Open {chart_sym} Full Dossier", use_container_width=True):
+                    st.session_state.inspect_symbol = chart_sym
+                    st.rerun()
+            with ch_c4:
+                if st.button("✖ Close Chart", type="primary", use_container_width=True):
+                    st.session_state.rt_chart_symbol = None
+                    st.rerun()
+
+            components.html(f"""
+            <div class="tradingview-widget-container" style="height:480px;width:100%;">
+              <div id="tradingview_rt_chart" style="height:465px;width:100%;"></div>
+              <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
+              <script type="text/javascript">
+              new TradingView.widget({{
+                "autosize": true,
+                "symbol": "{chart_sym}",
+                "interval": "{rt_interval}",
+                "timezone": "America/New_York",
+                "theme": "light",
+                "style": "1",
+                "locale": "en",
+                "enable_publishing": false,
+                "hide_top_toolbar": false,
+                "save_image": false,
+                "studies": ["EMA@tv-basicstudies", "RSI@tv-basicstudies"],
+                "container_id": "tradingview_rt_chart"
+              }});
+              </script>
+            </div>
+            """, height=485)
+
+    elif navigation == "Screener":
+        st.markdown("<h1>Find the Next Quality Leader or TCT Setup</h1>", unsafe_allow_html=True)
+        st.markdown("<p style='color: #52525b; margin-top: -12px;'>Use the One-Tap Strategy Presets below or build a custom scan across ~220 liquid US stocks.</p>", unsafe_allow_html=True)
+
+        all_watchlist_syms = get_all_monitored_tickers()
+        full_market_syms = []
+        for s_list in GICS_SECTORS.values():
+            full_market_syms.extend(s_list)
+        full_market_syms = list(dict.fromkeys(full_market_syms + all_watchlist_syms))
+
+        u_col1, u_col2 = st.columns([2.2, 1.8])
+        with u_col1:
+            universe_mode = st.radio(
+                "1. Choose Scan Universe",
+                [
+                    f"Expanded Liquid Market (~{len(full_market_syms)} Top US Stocks)",
+                    f"My Watchlists Only ({len(all_watchlist_syms)} Stocks — Instant)",
+                    "Custom Sector Selection below"
+                ],
+                horizontal=False
+            )
+        with u_col2:
+            st.markdown("**Quick Universe Stats**")
+            st.caption(
+                "• **Expanded Market:** Covers S&P 500 & Nasdaq leaders, AI, Semis, Quantum, Space, Nuclear, Crypto/Fintech, Biotech & Industrials.\n"
+                "• **Dual-Playbook Engine:** Automatically separates TCT Bottoms from Momentum Trend Swings."
+            )
+
+        st.markdown("### 2. One-Tap Strategy Preset Scans")
+        p_col1, p_col2, p_col3, p_col4 = st.columns(4)
+
+        def get_target_universe(selected_secs):
+            if universe_mode.startswith("My Watchlists"):
+                return all_watchlist_syms
+            elif universe_mode.startswith("Expanded Liquid"):
+                return full_market_syms
+            else:
+                out = []
+                for sc in selected_secs:
+                    out.extend(GICS_SECTORS[sc])
+                return list(dict.fromkeys(out))
+
+        with st.expander("Optional: Custom Sector & Technical Filter Builder", expanded=False):
+            f_col1, f_col2, f_col3 = st.columns([1.2, 1.4, 1.4])
+            with f_col1:
+                st.markdown("**GICS & Theme Sectors**")
+                selected_sectors = []
+                for sec in list(GICS_SECTORS.keys()):
+                    if st.checkbox(sec, value=True, key=f"sec_{sec}"):
+                        selected_sectors.append(sec)
+            with f_col2:
+                st.markdown("**Momentum & Relative Strength**")
+                s_rs = st.checkbox("🔥 Outperforming S&P 500 (RS Leader)", value=False)
+                s1 = st.checkbox("RSI Rising Above 55 (Momentum)", value=False)
+                s2 = st.checkbox("MACD Line Above Zero", value=False)
+                s3 = st.checkbox("MACD Bullish Crossover", value=False)
+                s4 = st.checkbox("20-Day High Breakout (Volume Confirmed)", value=False)
+                s7 = st.checkbox("Pullback Near 20D or 50D EMA Support", value=False)
+                s8 = st.checkbox("Price Above 200-day EMA", value=False)
+            with f_col3:
+                st.markdown("**TCT & Risk Filters**")
+                tct1 = st.checkbox("🟢 Action = 'BUY NOW' (TCT or Momentum)", value=False)
+                tct2 = st.checkbox("📐 True TCT Bottom Accumulation Box Only", value=False)
+                tct4 = st.checkbox("Reward-to-Risk ≥ 2.0R to Target", value=False)
+                tct5 = st.checkbox("Liquidity (20D Dollar Volume ≥ $50M)", value=False)
+
+            if st.button("Run Custom Filter Scan", type="primary"):
+                scan_univ = get_target_universe(selected_sectors)
+                with st.spinner(f"Scanning {len(scan_univ)} stocks with custom filters..."):
+                    s_data = fetch_batch_market_data(scan_univ, account_size=settings["account_size"])
+                    matches = []
+                    for t, d in s_data.items():
+                        if s_rs and not d["RS_Leader"]: continue
+                        if s1 and d["RSI"] < 55: continue
+                        if s2 and not d["MACD_Above_Zero"]: continue
+                        if s3 and not d["MACD_Cross"]: continue
+                        if s4 and not d["Is_Breakout"]: continue
+                        if s7 and not d["Pullback_EMA50"]: continue
+                        if s8 and not d["Above_EMA200"]: continue
+                        if tct1 and d["TCT_Priority"] != 0: continue
+                        if tct2 and not d["TCT_Valid_Range"]: continue
+                        if tct4 and not d["TCT_2R_Pass"]: continue
+                        if tct5 and not d["TCT_Liq_50M"]: continue
+                        matches.append(d)
+                    st.session_state.screener_matches = sorted(matches, key=lambda x: (x["TCT_Priority"], -x["Score"]))
+                    st.session_state.screener_title = f"Custom Filter Scan ({len(matches)} Matches)"
+
+        with p_col1:
+            if st.button("🟢 Preset 1: 'BUY NOW' Triggers", use_container_width=True, type="primary"):
+                scan_univ = get_target_universe(list(GICS_SECTORS.keys()))
+                with st.spinner(f"Scanning {len(scan_univ)} stocks for immediate BUY NOW triggers..."):
+                    s_data = fetch_batch_market_data(scan_univ, account_size=settings["account_size"])
+                    matches = [d for d in s_data.values() if d["TCT_Priority"] == 0 and d["TCT_2R_Pass"]]
+                    st.session_state.screener_matches = sorted(matches, key=lambda x: (-int(x["TCT_Valid_Range"]), -x["Score"]))
+                    st.session_state.screener_title = f"🟢 Preset 1: Immediate 'BUY NOW' Triggers ({len(matches)} Found)"
+
+        with p_col2:
+            if st.button("🚀 Preset 2: RS Momentum Leaders", use_container_width=True):
+                scan_univ = get_target_universe(list(GICS_SECTORS.keys()))
+                with st.spinner(f"Scanning {len(scan_univ)} stocks for S&P-beating Momentum Leaders..."):
+                    s_data = fetch_batch_market_data(scan_univ, account_size=settings["account_size"])
+                    matches = [d for d in s_data.values() if d["RS_Leader"] and d["Above_EMA50"] and (d["Is_Breakout"] or d["Score"] >= 75)]
+                    st.session_state.screener_matches = sorted(matches, key=lambda x: (-x["Score"], -x["RS_Diff"]))
+                    st.session_state.screener_title = f"🚀 Preset 2: Outperforming Momentum Leaders ({len(matches)} Found)"
+
+        with p_col3:
+            if st.button("🎯 Preset 3: Buy the Dip (Uptrend)", use_container_width=True):
+                scan_univ = get_target_universe(list(GICS_SECTORS.keys()))
+                with st.spinner(f"Scanning {len(scan_univ)} stocks for Uptrend Pullbacks near EMA support..."):
+                    s_data = fetch_batch_market_data(scan_univ, account_size=settings["account_size"])
+                    matches = [d for d in s_data.values() if d["Above_EMA50"] and d["Above_EMA200"] and d["Pullback_EMA50"] and 40 <= d["RSI"] <= 62]
+                    st.session_state.screener_matches = sorted(matches, key=lambda x: (-int(x["RS_Leader"]), -x["Score"]))
+                    st.session_state.screener_title = f"🎯 Preset 3: 'Buy the Dip' Near 20D/50D EMA Support ({len(matches)} Found)"
+
+        with p_col4:
+            if st.button("📐 Preset 4: True TCT Bottom Boxes", use_container_width=True):
+                scan_univ = get_target_universe(list(GICS_SECTORS.keys()))
+                with st.spinner(f"Scanning {len(scan_univ)} stocks for 25+ Bar TCT Accumulation Boxes..."):
+                    s_data = fetch_batch_market_data(scan_univ, account_size=settings["account_size"])
+                    matches = [d for d in s_data.values() if d["TCT_Valid_Range"]]
+                    st.session_state.screener_matches = sorted(matches, key=lambda x: (x["TCT_Priority"], -x["R_Multiple"]))
+                    st.session_state.screener_title = f"📐 Preset 4: Valid 25+ Bar TCT Bottom Accumulation Boxes ({len(matches)} Found)"
+
+        if st.session_state.screener_matches is not None:
+            st.markdown("---")
+            c_hdr, c_clr = st.columns([8, 2])
+            with c_hdr:
+                st.markdown(f"### {st.session_state.screener_title or 'Scan Results'}")
+            with c_clr:
+                if st.button("Clear Results"):
+                    st.session_state.screener_matches = None
+                    st.rerun()
+
+            matches = st.session_state.screener_matches
+            if not matches:
+                st.info("No stocks matched that exact preset right now. Try switching the Scan Universe above to 'Expanded Liquid Market' or try another preset.")
+            target_add_folder = st.selectbox("Add selected stocks to folder:", list(watchlists.keys()), index=1, key="sc_target_folder")
+            for m in matches:
+                c1, c2, c3, c4 = st.columns([3.4, 2.7, 1.8, 1.0])
+                rs_badge = f'<span class="badge badge-rs-lead" style="margin-left:6px;">🔥 RS +{m["RS_Diff"]:.1f}%</span>' if m["RS_Leader"] else f'<span class="badge badge-rs-lag" style="margin-left:6px;">RS {m["RS_Diff"]:.1f}%</span>'
+                with c1:
+                    st.markdown(
+                        f"""
+                        <div>
+                            <a href="?inspect={m['Ticker']}" target="_self" class="ticker-link">📊 {m['Ticker']}</a>
+                            <span class="badge {m['TCT_Badge']}" style="margin-left: 8px;">{m['TCT_Action']}</span>{rs_badge}
+                        </div>
+                        <div style="font-size: 0.85rem; color: #71717a; margin-top: 3px;">${m['Price']:,.2f} · <span style="color: {'#15803d' if m['Change']>=0 else '#b91c1c'}; font-weight: 600;">{'+' if m['Change']>=0 else ''}{m['Change_Pct']:.2f}%</span> · <b>{m['TCT_Model']}</b></div>
+                        <div style="font-size: 0.8rem; color: #475569; margin-top: 4px;">{m['TCT_Explain']}</div>
+                        """, unsafe_allow_html=True
+                    )
+                with c2:
+                    st.markdown(
+                        f"""
+                        <div style="font-size: 0.82rem; line-height: 1.5;">
+                            <b>Buy Trigger:</b> ${m['BOS_Level']:,.2f}<br>
+                            <b>Take Profit:</b> <span style="color:#15803d; font-weight:600;">${m['Target_Price']:,.2f} (+{m['Target_Pct']:.1f}%)</span><br>
+                            <b>Stop-Loss:</b> <span style="color:#b91c1c; font-weight:600;">${m['Stop_Price']:,.2f} ({m['Stop_Pct']:.1f}%)</span> · <b>{m['R_Multiple']:.1f}R</b> · <b>{m['Shares_05Pct']} shs</b>
+                        </div>
+                        """, unsafe_allow_html=True
+                    )
+                with c3:
+                    st.plotly_chart(render_sparkline(m["Sparkline"], m["Change"] >= 0), use_container_width=False)
+                with c4:
+                    if st.button("➕ Add", key=f"add_sc_{m['Ticker']}"):
+                        if m["Ticker"] not in watchlists[target_add_folder]:
+                            watchlists[target_add_folder].append(m["Ticker"])
+                            ok, msg = sync_watchlists_to_github(watchlists)
+                            st.success("Synced!" if ok else "Added")
+
+    elif navigation == "Watchlist":
+        st.markdown("<h1>Watchlists & Dual-Playbook Action Tickets</h1>", unsafe_allow_html=True)
+        st.markdown("<p style='color: #52525b; margin-top: -12px;'>Switch between your 3+ watchlists, reorder stocks with Up/Down buttons, or tap any stock symbol to open its chart.</p>", unsafe_allow_html=True)
+
+        folder = st.radio("Select Watchlist Folder", list(watchlists.keys()), horizontal=True)
+        symbols = watchlists.get(folder, [])
+
+        col_add, col_sort, col_ed = st.columns([2.6, 2.2, 1.2])
+        with col_add:
+            c_in, c_btn = st.columns([3, 1])
+            new_sym = c_in.text_input("Add symbol to folder", placeholder=f"Add to {folder} (e.g. AVGO)", label_visibility="collapsed").upper().strip()
+            if c_btn.button("+ Add") and new_sym:
+                if new_sym not in symbols:
+                    watchlists[folder].append(new_sym)
+                    ok, msg = sync_watchlists_to_github(watchlists)
+                    st.toast(msg)
+                    st.rerun()
+
+        with col_sort:
+            sort_by = st.selectbox(
+                "Sort By",
+                [
+                    "Saved Order (My Custom Sequence)",
+                    "Action Signal (Buy Now First)",
+                    "Relative Strength vs S&P 500",
+                    "Composite Score (High → Low)",
+                    "Reward-to-Risk Ratio (High → Low)",
+                    "Momentum State",
+                    "Day % Change (High → Low)",
+                    "Alphabetical (A → Z)"
+                ],
+                index=0,
+                label_visibility="collapsed"
+            )
+
+        with col_ed:
+            show_reorder = st.checkbox("✏️ Edit / Reorder List", value=False)
+
+        if show_reorder:
+            render_watchlist_reorder_panel(folder, key_prefix="wl_ed")
+
+        pills_html = "".join([f'<a href="?inspect={s}" target="_self" class="pill">{i+1}. {s}</a>' for i, s in enumerate(symbols)])
+        st.markdown(f"<div style='margin-bottom: 12px;'>{pills_html}</div>", unsafe_allow_html=True)
+
+        st.markdown("---")
+
+        data_dict = fetch_batch_market_data(symbols, account_size=settings["account_size"])
+        earnings_map = fetch_upcoming_earnings_map(symbols)
+
+        display_symbols = list(symbols)
+        if sort_by == "Action Signal (Buy Now First)":
+            display_symbols = sorted(display_symbols, key=lambda s: (data_dict.get(s, {}).get("TCT_Priority", 9), -data_dict.get(s, {}).get("Score", 0)))
+        elif sort_by == "Relative Strength vs S&P 500":
+            display_symbols = sorted(display_symbols, key=lambda s: data_dict.get(s, {}).get("RS_Diff", -999), reverse=True)
+        elif sort_by == "Composite Score (High → Low)":
+            display_symbols = sorted(display_symbols, key=lambda s: data_dict.get(s, {}).get("Score", 0), reverse=True)
+        elif sort_by == "Reward-to-Risk Ratio (High → Low)":
+            display_symbols = sorted(display_symbols, key=lambda s: data_dict.get(s, {}).get("R_Multiple", 0), reverse=True)
+        elif sort_by == "Momentum State":
+            state_priority = {"Confirmed Breakout": 0, "Active Trend": 1, "Entry Candidate": 2, "Support Break": 3}
+            display_symbols = sorted(display_symbols, key=lambda s: state_priority.get(data_dict.get(s, {}).get("State", ""), 4))
+        elif sort_by == "Day % Change (High → Low)":
+            display_symbols = sorted(display_symbols, key=lambda s: data_dict.get(s, {}).get("Change_Pct", -999), reverse=True)
+        elif sort_by == "Alphabetical (A → Z)":
+            display_symbols = sorted(display_symbols)
+
+        left_c, right_c = st.columns(2)
+
+        for idx, sym in enumerate(display_symbols):
+            target_c = left_c if idx % 2 == 0 else right_c
+            if sym in data_dict:
+                d = data_dict[sym]
+                rs_html = f'<span class="badge badge-rs-lead" style="margin-left: 4px;">🔥 Leading S&P ({d["RS_Diff"]:+.1f}%)</span>' if d["RS_Leader"] else f'<span class="badge badge-rs-lag" style="margin-left: 4px;">RS {d["RS_Diff"]:+.1f}%</span>'
+                earn_html = ""
+                if sym in earnings_map:
+                    days_left, dt_s = earnings_map[sym]
+                    if days_left <= 7:
+                        earn_html = f'<div style="margin-top:6px;"><span class="badge badge-earn-warn">⚠️ EARNINGS IN {days_left}d ({dt_s}) — AVOID NEW BUY</span></div>'
+
+                with target_c:
+                    st.markdown(
+                        f'<div class="stock-card"><div style="display: flex; justify-content: space-between; align-items: flex-start;"><div><a href="?inspect={d["Ticker"]}" target="_self" class="ticker-link">📊 {d["Ticker"]}</a><span class="badge {d["TCT_Badge"]}" style="margin-left: 8px;">{d["TCT_Action"]}</span><span class="badge {d["Badge"]}" style="margin-left: 4px;">{d["State"]}</span>{rs_html}{earn_html}<div style="font-size: 1.35rem; font-weight: 700; margin-top: 6px;">${d["Price"]:,.2f} <span style="font-size: 0.9rem; color: {"#15803d" if d["Change"]>=0 else "#b91c1c"}; font-weight: 600;">{"+" if d["Change"]>=0 else ""}{d["Change_Pct"]:.2f}%</span></div></div><div style="text-align: right;"><div style="font-size: 1.6rem; font-weight: 700; color: #c5a059; font-family: \'Newsreader\', serif;">{d["Score"]}</div><div style="font-size: 0.7rem; color: #71717a; text-transform: uppercase;">Score</div></div></div><div class="trade-ticket"><div style="display: flex; justify-content: space-between; font-weight: 600; color: #0f291e; margin-bottom: 4px;"><span>🎯 Buy Trigger: ${d["BOS_Level"]:,.2f}</span><span>📐 Reward/Risk: {d["R_Multiple"]:.1f}R</span></div><div style="display: flex; justify-content: space-between;"><span>🟢 <b>Take Profit:</b> <span style="color:#15803d; font-weight:700;">${d["Target_Price"]:,.2f}</span> (+{d["Target_Pct"]:.1f}%)</span><span>🔴 <b>Stop-Loss:</b> <span style="color:#b91c1c; font-weight:700;">${d["Stop_Price"]:,.2f}</span> ({d["Stop_Pct"]:.1f}%)</span></div><div style="margin-top: 4px; font-size: 0.76rem; color: #52525b; display: flex; justify-content: space-between;"><span><b>0.5% Risk Size:</b> Buy {d["Shares_05Pct"]} shares (${d["Pos_Value"]:,.0f})</span><span><b>{d["TCT_Model"]}</b></span></div></div><div style="display: flex; justify-content: space-between; align-items: center; margin-top: 8px; font-size: 0.78rem; color: #52525b;"><div>Day High: <b>${d["Day_High"]:,.2f}</b></div><div>Day Low: <b>${d["Day_Low"]:,.2f}</b></div><div>RSI: <b>{d["RSI"]:.1f}</b></div><div>EMA 50: <b>${d["History"]["EMA50"].iloc[-1]:,.2f}</b></div></div><div style="font-size: 0.80rem; color: #475569; margin-top: 6px; font-style: italic;">"{d["TCT_Explain"]}"</div></div>',
+                        unsafe_allow_html=True
+                    )
+
+    elif navigation == "Precious Metals, Crypto & Currency":
+        st.markdown("<h1>Precious Metals, Crypto & Currency</h1>", unsafe_allow_html=True)
+        st.markdown("<p style='color: #52525b; margin-top: -12px;'>Live Precious & Industrial Metals, Cryptocurrencies, and Major FX with clickable charts, realistic Buy/Target/Stop levels, and dedicated news.</p>", unsafe_allow_html=True)
+
+        METALS_GROUP = {
+            "Gold Futures / Spot (USD/oz)": "GC=F",
+            "Silver Futures / Spot (USD/oz)": "SI=F",
+            "Copper Futures (USD/lb)": "HG=F",
+            "Platinum Futures (USD/oz)": "PL=F",
+            "SPDR Gold Trust ETF (GLD)": "GLD",
+            "iShares Silver Trust ETF (SLV)": "SLV"
+        }
+        CRYPTO_GROUP = {
+            "Bitcoin (BTC/USD)": "BTC-USD",
+            "Ethereum (ETH/USD)": "ETH-USD",
+            "XRP (XRP/USD)": "XRP-USD",
+            "Solana (SOL/USD)": "SOL-USD"
+        }
+        FX_GROUP = {
+            "US Dollar Index (DXY)": "DX-Y.NYB",
+            "USD / JPY": "JPY=X",
+            "EUR / USD": "EURUSD=X"
+        }
+
+        all_mcf_syms = list(METALS_GROUP.values()) + list(CRYPTO_GROUP.values()) + list(FX_GROUP.values())
+        mcf_data = fetch_batch_market_data(all_mcf_syms, account_size=settings["account_size"])
+
+        def render_asset_group(group_dict):
+            c1, c2 = st.columns(2)
+            for idx, (title, sym) in enumerate(group_dict.items()):
+                col = c1 if idx % 2 == 0 else c2
+                if sym in mcf_data:
+                    m = mcf_data[sym]
+                    decimals = 4 if sym in ("EURUSD=X", "XRP-USD", "HG=F") else 2
+                    with col:
+                        st.markdown(
+                            f'<div class="stock-card"><div style="display:flex; justify-content:space-between; align-items:center;"><div style="font-size: 0.76rem; color: #71717a; text-transform: uppercase; font-weight: 700;">{title}</div><span class="badge {m["TCT_Badge"]}">{m["TCT_Action"]}</span></div><div style="display: flex; justify-content: space-between; align-items: baseline; margin-top: 6px;"><div><a href="?inspect={sym}" target="_self" class="ticker-link">📊 {sym}</a><span style="font-size: 1.45rem; font-weight: 700; color: #0f291e; margin-left: 10px;">${m["Price"]:,.{decimals}f}</span><span style="font-size: 0.92rem; color: {"#15803d" if m["Change"]>=0 else "#b91c1c"}; font-weight: 600; margin-left: 6px;">{"+" if m["Change"]>=0 else ""}{m["Change_Pct"]:.2f}%</span></div><span class="badge {m["Badge"]}">{m["State"]}</span></div><div class="trade-ticket"><div style="display:flex; justify-content:space-between;"><span>🎯 <b>Buy Trigger:</b> ${m["BOS_Level"]:,.{decimals}f}</span><span>📐 <b>Reward/Risk:</b> {m["R_Multiple"]:.1f}R</span></div><div style="display:flex; justify-content:space-between; margin-top:3px;"><span>🟢 <b>Target:</b> <b style="color:#15803d;">${m["Target_Price"]:,.{decimals}f}</b> (+{m["Target_Pct"]:.1f}%)</span><span>🔴 <b>Stop:</b> <b style="color:#b91c1c;">${m["Stop_Price"]:,.{decimals}f}</b> ({m["Stop_Pct"]:.1f}%)</span></div></div><div style="margin-top: 8px; font-size: 0.78rem; color: #52525b; display:flex; justify-content:space-between;"><span>Day High: <b>${m["Day_High"]:,.{decimals}f}</b></span><span>Day Low: <b>${m["Day_Low"]:,.{decimals}f}</b></span><span>RSI: <b>{m["RSI"]:.1f}</b></span><span>EMA 50: <b>${m["History"]["EMA50"].iloc[-1]:,.{decimals}f}</b></span></div></div>',
+                            unsafe_allow_html=True
+                        )
+
+        st.subheader("1. Precious & Industrial Metals (Gold, Silver, Copper, Platinum)")
+        render_asset_group(METALS_GROUP)
+
+        st.markdown("---")
+        st.subheader("2. Cryptocurrencies (BTC, ETH, XRP, SOL)")
+        render_asset_group(CRYPTO_GROUP)
+
+        st.markdown("---")
+        st.subheader("3. Currencies & US Dollar Index (DXY, USD/JPY, EUR/USD)")
+        render_asset_group(FX_GROUP)
+
+        st.markdown("---")
+        st.subheader("4. Precious Metals, Crypto & USD News Stream (Last 72 Hours)")
+        mcf_news = fetch_metals_crypto_fx_news(max_items=settings["news_limit"], max_age_hours=settings["max_news_age_hours"])
+        if mcf_news:
+            news_html = '<div class="scroll-news-box">'
+            for a in mcf_news:
+                news_html += f'<div style="background: white; border: 1px solid #e7e2d9; border-radius: 8px; padding: 12px 16px; margin-bottom: 8px;"><div style="display: flex; justify-content: space-between; font-size: 0.72rem; color: #71717a;"><span style="font-weight: 700; color: #0f291e;"><span class="ticker-news-badge">[{a["ticker"]}]</span> {a["publisher"]}<span class="age-badge">{a["age"]}</span></span><span>{a["date"]}</span></div><div style="font-weight: 600; font-size: 0.92rem; margin-top: 4px;"><a href="{a["link"]}" target="_blank" style="color: #0f291e; text-decoration: none;">{a["title"]}</a></div></div>'
+            news_html += '</div>'
+            st.markdown(news_html, unsafe_allow_html=True)
+
+    elif navigation == "News & Earnings":
+        st.markdown("<h1>News & Catalyst Monitor</h1>", unsafe_allow_html=True)
+        st.markdown("<p style='color: #52525b; margin-top: -12px;'>Strict 72-hour verified news stream (spam aggregators blocked) and chronologically sorted earnings calendar.</p>", unsafe_allow_html=True)
+
+        n_col1, n_col2 = st.columns([2, 1])
+
+        tracked_symbols = get_all_monitored_tickers()
+
+        with n_col1:
+            n_tab1, n_tab2 = st.tabs([
+                f"Watchlist News ({len(tracked_symbols)} Stocks)",
+                "Metals, Crypto & USD News"
+            ])
+            with n_tab1:
+                pool_articles = fetch_watchlist_news_pool(tracked_symbols, max_items=settings["news_limit"], max_age_hours=settings["max_news_age_hours"])
+                if pool_articles:
+                    st.caption(f"Showing {len(pool_articles)} verified headlines from the past {settings['max_news_age_hours']} hours.")
+                    news_html = '<div class="scroll-news-box">'
+                    for a in pool_articles:
+                        ticker_name = a.get("ticker", "ALERT")
+                        news_html += f'<div style="background: white; border: 1px solid #e7e2d9; border-radius: 8px; padding: 12px 16px; margin-bottom: 8px;"><div style="display: flex; justify-content: space-between; font-size: 0.72rem; color: #71717a;"><span style="font-weight: 700; color: #0f291e;"><span class="ticker-news-badge">[{ticker_name}]</span> {a["publisher"]}<span class="age-badge">{a["age"]}</span></span><span>{a["date"]}</span></div><div style="font-weight: 600; font-size: 0.92rem; margin-top: 4px;"><a href="{a["link"]}" target="_blank" style="color: #0f291e; text-decoration: none;">{a["title"]}</a></div></div>'
+                    news_html += '</div>'
+                    st.markdown(news_html, unsafe_allow_html=True)
+                else:
+                    st.info("No verified headlines in the past 72 hours for your tracked stocks.")
+
+            with n_tab2:
+                mcf_articles = fetch_metals_crypto_fx_news(max_items=settings["news_limit"], max_age_hours=settings["max_news_age_hours"])
+                if mcf_articles:
+                    st.caption(f"Showing {len(mcf_articles)} verified Metals, Crypto & USD headlines from the past {settings['max_news_age_hours']} hours.")
+                    c_html = '<div class="scroll-news-box">'
+                    for a in mcf_articles:
+                        c_html += f'<div style="background: white; border: 1px solid #e7e2d9; border-radius: 8px; padding: 12px 16px; margin-bottom: 8px;"><div style="display: flex; justify-content: space-between; font-size: 0.72rem; color: #71717a;"><span style="font-weight: 700; color: #0f291e;"><span class="ticker-news-badge">[{a["ticker"]}]</span> {a["publisher"]}<span class="age-badge">{a["age"]}</span></span><span>{a["date"]}</span></div><div style="font-weight: 600; font-size: 0.92rem; margin-top: 4px;"><a href="{a["link"]}" target="_blank" style="color: #0f291e; text-decoration: none;">{a["title"]}</a></div></div>'
+                    c_html += '</div>'
+                    st.markdown(c_html, unsafe_allow_html=True)
+
+        with n_col2:
+            st.subheader("Upcoming Earnings Calendar")
+            earnings_map = fetch_upcoming_earnings_map(tracked_symbols)
+            if earnings_map:
+                rows = []
+                for s, (days_left, dt_str) in earnings_map.items():
+                    rows.append({
+                        "Ticker": s,
+                        "Earnings Date": dt_str,
+                        "In Days": f"{days_left}d" + (" ⚠️" if days_left <= 7 else ""),
+                        "_sort": days_left
+                    })
+                rows = sorted(rows, key=lambda x: x["_sort"])
+                clean_df = pd.DataFrame([{"Ticker": r["Ticker"], "Earnings Date": r["Earnings Date"], "Countdown": r["In Days"]} for r in rows])
+                st.table(clean_df)
+            else:
+                st.info("No confirmed upcoming earnings within the next 45 days.")
+
+    elif navigation == "Settings":
+        st.markdown("<h1>Settings & Strategy Calibration</h1>", unsafe_allow_html=True)
+        st.markdown("<p style='color: #52525b; margin-top: -12px;'>Configure your TCT account size, news freshness cutoff, and test your Daily Briefing push alert.</p>", unsafe_allow_html=True)
+
+        s_col1, s_col2 = st.columns(2)
+
+        with s_col1:
+            st.subheader("TCT Portfolio & News Freshness")
+            acc_val = st.number_input("Total Trading Account Size ($ USD) — For 0.5% Risk Share Sizing", min_value=1000, max_value=50000000, value=int(settings.get("account_size", 100000)), step=5000)
+            news_lim = st.slider("Max News Headlines in Scrollable Feed", min_value=20, max_value=100, value=int(settings.get("news_limit", 60)), step=10)
+            max_age_h = st.slider("Strict News Age Cutoff (Hours) — Blocks Older Articles", min_value=24, max_value=120, value=int(settings.get("max_news_age_hours", 72)), step=12)
+
+            st.markdown("---")
+            st.subheader("Score Weighting Defaults")
+            w_f = st.slider("Fundamentals Weight", 0, 100, settings["w_fund"])
+            w_t = st.slider("Technical Trend Weight", 0, 100, settings["w_tech"])
+            w_m = st.slider("Momentum Weight", 0, 100, settings["w_mom"])
+
+            if st.button("Save All Settings", type="primary"):
+                settings["account_size"] = acc_val
+                settings["news_limit"] = news_lim
+                settings["max_news_age_hours"] = max_age_h
+                settings["w_fund"] = w_f
+                settings["w_tech"] = w_t
+                settings["w_mom"] = w_m
+                save_json(SETTINGS_FILE, settings)
+                st.cache_data.clear()
+                st.success("Settings saved and cache refreshed!")
+
+        with s_col2:
+            st.subheader("Push Notifications (Style 1 Daily Briefing)")
+            all_syms = get_all_monitored_tickers()
+            current_data = fetch_batch_market_data(all_syms, account_size=settings["account_size"])
+
+            if st.button("🔔 Send Live Daily Briefing Ping to iPad Now", type="primary"):
+                buys = [f"{k} (Buy ${v['BOS_Level']:.2f} -> Target ${v['Target_Price']:.2f})" for k, v in current_data.items() if v["TCT_Priority"] == 0]
+                tct_boxes = [f"{k} (BOS ${v['BOS_Level']:.2f})" for k, v in current_data.items() if v["TCT_Valid_Range"] and v["TCT_Priority"] != 0]
+                breaks = [k for k, v in current_data.items() if v["State"] == "Confirmed Breakout" and v["TCT_Priority"] != 0]
+                sells = [f"{k} (${v['Price']:.2f})" for k, v in current_data.items() if v["TCT_Priority"] == 4]
+                summary_msg = (
+                    f"🟢 BUY NOW ({len(buys)}): {', '.join(buys[:6]) if buys else 'None'}\n"
+                    f"📐 In TCT Bottom Box ({len(tct_boxes)}): {', '.join(tct_boxes[:6]) if tct_boxes else 'None'}\n"
+                    f"🚀 Momentum Breakouts ({len(breaks)}): {', '.join(breaks[:8]) if breaks else 'None'}\n"
+                    f"🔴 Below 50 EMA / Avoid ({len(sells)}): {', '.join(sells[:8]) if sells else 'None'}"
+                )
+                ok, status_msg = send_ntfy_alert(summary_msg, "Daily Portfolio Briefing")
+                if ok:
+                    st.success(f"✅ {status_msg}")
+                else:
+                    st.error(f"❌ {status_msg}")
+
+            st.markdown("---")
+            st.subheader("Export Strategy Review CSV")
+            if current_data:
+                export_rows = []
+                for sym_name, d in current_data.items():
+                    export_rows.append({
+                        "Timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        "Ticker": sym_name,
+                        "Price": d["Price"],
+                        "Change": d["Change"],
+                        "Change_Pct": d["Change_Pct"],
+                        "Day_High": d["Day_High"],
+                        "Day_Low": d["Day_Low"],
+                        "Playbook": d["TCT_Model"],
+                        "Action_Signal": d["TCT_Action"],
+                        "Buy_Trigger": d["BOS_Level"],
+                        "Take_Profit_Target": d["Target_Price"],
+                        "Stop_Loss": d["Stop_Price"],
+                        "Reward_Risk_R": round(d["R_Multiple"], 2),
+                        "Suggested_Shares_05Pct": d["Shares_05Pct"],
+                        "RS_vs_SP500_Pct": round(d["RS_Diff"], 2),
+                        "Composite_Score": d["Score"],
+                        "Momentum_State": d["State"]
+                    })
+                df_export = pd.DataFrame(export_rows)
+
+                st.download_button(
+                    label="📥 Download Full TCT & Momentum Plan CSV",
+                    data=df_export.to_csv(index=False).encode("utf-8"),
+                    file_name=f"tct_momentum_plan_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
+                    mime="text/csv", type="primary"
+                )
