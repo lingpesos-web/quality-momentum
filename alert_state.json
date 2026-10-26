@@ -1,27 +1,20 @@
 {
-  "date": "2026-10-23",
+  "date": "2026-10-26",
   "alerted": [
-    "AMAT_STOP",
-    "AMD_STOP",
+    "ADPT_BUY",
     "CLS_STOP",
-    "COHR_STOP",
-    "CRCL_BUY",
+    "CRCL_STOP",
     "CRDO_STOP",
     "CRWD_BUY",
-    "GLW_STOP",
     "GME_STOP",
     "HOOD_STOP",
-    "IREN_STOP",
-    "LRCX_STOP",
-    "LYTE_STOP",
+    "LITE_BUY",
     "MSTR_BUY",
     "QUBT_STOP",
     "SKHY_STOP",
     "SLV_STOP",
     "SNDK_STOP",
-    "STX_STOP",
-    "UGL_STOP",
-    "VRT_STOP",
-    "WDC_STOP"
+    "TEM_STOP",
+    "UGL_STOP"
   ]
 }
