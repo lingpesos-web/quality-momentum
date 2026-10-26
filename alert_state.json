@@ -10,10 +10,12 @@
     "HOOD_STOP",
     "LITE_BUY",
     "MSTR_BUY",
+    "MSTR_STOP",
     "QUBT_STOP",
     "SKHY_STOP",
     "SLV_STOP",
     "SNDK_STOP",
+    "STX_STOP",
     "TEM_STOP",
     "UGL_STOP"
   ]
