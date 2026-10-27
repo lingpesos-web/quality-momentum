@@ -8,6 +8,8 @@
     "CRWD_BUY",
     "DRAM_BUY",
     "GME_STOP",
+    "HOOD_STOP",
+    "MSTR_BUY",
     "MSTR_STOP",
     "MU_BUY",
     "SNDK_STOP",
