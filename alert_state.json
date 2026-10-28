@@ -1,21 +1,25 @@
 {
-  "date": "2026-10-27",
+  "date": "2026-10-28",
   "alerted": [
     "ADPT_BUY",
-    "APP_BUY",
+    "AMAT_BUY",
+    "AMD_BUY",
     "AVGO_BUY",
+    "CLS_BUY",
     "COST_STOP",
-    "CRWD_BUY",
     "DRAM_BUY",
     "GME_STOP",
     "HOOD_STOP",
+    "LITE_BUY",
+    "LRCX_BUY",
+    "MRVL_BUY",
     "MSTR_BUY",
-    "MSTR_STOP",
-    "MU_BUY",
-    "SNDK_STOP",
+    "NVDA_STOP",
+    "SKHY_BUY",
     "SOFI_BUY",
+    "SPCX_STOP",
+    "STX_BUY",
     "TEM_BUY",
-    "VRT_BUY",
     "WDC_BUY"
   ]
 }
