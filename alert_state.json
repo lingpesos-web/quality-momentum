@@ -1,5 +1,5 @@
 {
-  "date": "2026-10-30",
+  "date": "2026-11-02",
   "alerted": [
     "ADPT_STOP",
     "AMAT_STOP",
@@ -8,16 +8,20 @@
     "CLS_STOP",
     "COHR_STOP",
     "COIN_STOP",
+    "COST_BUY",
     "CRCL_STOP",
     "CRDO_STOP",
     "CRWD_STOP",
+    "DRAM_STOP",
     "GLW_STOP",
     "HOOD_STOP",
     "IREN_STOP",
     "LITE_STOP",
     "LRCX_STOP",
     "LYTE_STOP",
+    "MRVL_STOP",
     "MSTR_STOP",
+    "MU_STOP",
     "NVDA_STOP",
     "PLTR_STOP",
     "QUBT_STOP",
@@ -25,10 +29,8 @@
     "SLV_STOP",
     "SNDK_STOP",
     "SOFI_BUY",
-    "SPCX_STOP",
-    "TEM_STOP",
-    "UGL_STOP",
+    "TEM_BUY",
     "VRT_BUY",
-    "VRT_STOP"
+    "WDC_STOP"
   ]
 }
