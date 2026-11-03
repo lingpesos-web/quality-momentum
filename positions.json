@@ -8,5 +8,15 @@
     "StopLoss": 24.012,
     "Target15": 30.682,
     "HalfSold": false
+  },
+  {
+    "id": "SPCH_1793699932",
+    "Ticker": "SPCH",
+    "BuyPrice": 10.6,
+    "Shares": 1800,
+    "BuyDate": "2026-09-08",
+    "StopLoss": 9.54,
+    "Target15": 12.19,
+    "HalfSold": false
   }
 ]
