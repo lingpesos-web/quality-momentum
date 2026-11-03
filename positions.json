@@ -28,5 +28,15 @@
     "StopLoss": 69.498,
     "Target15": 88.803,
     "HalfSold": false
+  },
+  {
+    "id": "VRT_1793700048",
+    "Ticker": "VRT",
+    "BuyPrice": 258.12,
+    "Shares": 150,
+    "BuyDate": "2026-08-28",
+    "StopLoss": 232.30800000000002,
+    "Target15": 296.83799999999997,
+    "HalfSold": false
   }
 ]
