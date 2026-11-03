@@ -1,1 +1,12 @@
-[]
+[
+  {
+    "id": "ADPT_1793699868",
+    "Ticker": "ADPT",
+    "BuyPrice": 26.68,
+    "Shares": 800,
+    "BuyDate": "2026-10-07",
+    "StopLoss": 24.012,
+    "Target15": 30.682,
+    "HalfSold": false
+  }
+]
