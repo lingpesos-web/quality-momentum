@@ -1,4 +1,103 @@
+import streamlit as st
+import streamlit.components.v1 as components
+import yfinance as yf
+import pandas as pd
+import numpy as np
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+import json
+import os
+import time
+import base64
+import urllib.request
+import urllib.parse
+import xml.etree.ElementTree as ET
+import email.utils
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
+from concurrent.futures import ThreadPoolExecutor
 
+st.set_page_config(
+    page_title="Quality Momentum & TCT Cockpit",
+    page_icon="📈",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+# --- INITIALIZE SESSION STATE & URL ROUTING ---
+for k, v in [
+    ("inspect_symbol", None),
+    ("rt_chart_symbol", None),
+    ("nav_radio", "Dashboard"),
+    ("screener_matches", None),
+    ("screener_title", None),
+    ("wl_preset_filter", "ALL"),
+    ("last_good_data", {})
+]:
+    if k not in st.session_state:
+        st.session_state[k] = v
+
+if "inspect" in st.query_params:
+    clicked_sym = st.query_params.get("inspect", "").strip().upper()
+    if clicked_sym:
+        st.session_state.inspect_symbol = clicked_sym
+    st.query_params.clear()
+
+if "rt_chart" in st.query_params:
+    rt_sym = st.query_params.get("rt_chart", "").strip().upper()
+    if rt_sym:
+        st.session_state.rt_chart_symbol = rt_sym
+        st.session_state.inspect_symbol = None
+        st.session_state.nav_radio = "⚡ Live Real-Time Quotes"
+    st.query_params.clear()
+
+def clear_inspection():
+    st.session_state.inspect_symbol = None
+    if "inspect" in st.query_params or "rt_chart" in st.query_params:
+        st.query_params.clear()
+
+# --- NTFY ALERT ENGINE (ASCII-SAFE HEADER) ---
+STATE_FILE = "alert_state.json"
+DATA_FILE = "watchlists.json"
+SETTINGS_FILE = "settings.json"
+GITHUB_REPO = "lingpesos-web/quality-momentum"
+GITHUB_BRANCH = "main"
+
+def load_json(filepath, default):
+    if os.path.exists(filepath):
+        try:
+            with open(filepath, "r") as f:
+                data = json.load(f)
+                if isinstance(data, dict) and data:
+                    return data
+        except Exception:
+            pass
+    return default
+
+def save_json(filepath, data):
+    try:
+        with open(filepath, "w") as f:
+            json.dump(data, f, indent=2)
+    except Exception:
+        pass
+
+def send_ntfy_alert(message, title="Daily Portfolio Briefing"):
+    try:
+        ascii_title = title.encode("ascii", "ignore").decode("ascii").strip() or "Market Alert"
+        req = urllib.request.Request(
+            "https://ntfy.sh/2026_USstockspicks",
+            data=message.encode("utf-8"),
+            headers={
+                "Title": ascii_title,
+                "Priority": "high",
+                "Content-Type": "text/plain; charset=utf-8"
+            },
+            method="POST"
+        )
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            return True, f"Delivered (HTTP {resp.status}) to topic '2026_USstockspicks'"
+    except Exception as e:
+        return False, f"ntfy error: {str(e)}"
 def check_and_fire_active_position_alerts(records):
     """Monitors logged positions in positions.json and sends live alerts if rules trigger."""
     if not records or not positions:
@@ -1055,7 +1154,7 @@ else:
 
                 with (left_c if idx % 2 == 0 else right_c):
                     st.markdown(
-                        f'<div class="stock-card"><div style="display: flex; justify-content: space-between; align-items: flex-start;"><div><a href="?inspect={d["Ticker"]}" target="_self" class="ticker-link">📊 {d["Ticker"]}</a><span class="badge {d["TCT_Badge"]}" style="margin-left: 8px;">{d["TCT_Action"]}</span>{rs_html}{earn_html}<div style="font-size: 1.35rem; font-weight: 700; margin-top: 6px;">${d["Price"]:,.2f} <span style="font-size: 0.9rem; color: {"#15803d" if d["Change"]>=0 else "#b91c1c"}; font-weight: 700;">{arr_w}${abs(d["Change"]):.2f} ({d["Change_Pct"]:+.2f}%)</span></div></div><div style="text-align: right;"><div style="font-size: 1.6rem; font-weight: 700; color: #c5a059; font-family: 'Newsreader', serif;">{d["Score"]}</div><div style="font-size: 0.7rem; color: #71717a; text-transform: uppercase;">Score</div></div></div><div class="trade-ticket"><div style="display: flex; justify-content: space-between; font-weight: 700; color: #0f291e; margin-bottom: 4px;"><span>{d["TCT_Model"]}</span><span>📐 Reward/Risk: {d["R_Multiple"]:.1f}R</span></div><div style="display: flex; justify-content: space-between;"><span>🎯 <b>Buy Trigger:</b> ${d["BOS_Level"]:,.2f}</span><span>🟢 <b>Take Profit:</b> <span style="color:#15803d; font-weight:700;">${d["Target_Price"]:,.2f}</span> (+{d["Target_Pct"]:.1f}%)</span></div><div style="margin-top: 4px; display: flex; justify-content: space-between;"><span>🔴 <b>Stop-Loss:</b> <span style="color:#b91c1c; font-weight:700;">${d["Stop_Price"]:,.2f}</span> ({d["Stop_Pct"]:.1f}%)</span><span><b>0.5% Size:</b> {d["Shares_05Pct"]} shs (${d["Pos_Value"]:,.0f})</span></div></div><div style="display: flex; justify-content: space-between; align-items: center; margin-top: 8px; font-size: 0.78rem; color: #52525b;"><div>Day High: <b>${d["Day_High"]:,.2f}</b></div><div>Day Low: <b>${d["Day_Low"]:,.2f}</b></div><div>RSI(14/2): <b>{d["RSI"]:.0f}/{d["RSI2"]:.0f}</b></div><div>EMA 50: <b>${d["EMA50_Val"]:,.2f}</b></div></div><div style="font-size: 0.80rem; color: #475569; margin-top: 6px; font-style: italic;">"{d["TCT_Explain"]}"</div></div>',
+                        f'<div class="stock-card"><div style="display: flex; justify-content: space-between; align-items: flex-start;"><div><a href="?inspect={d["Ticker"]}" target="_self" class="ticker-link">📊 {d["Ticker"]}</a><span class="badge {d["TCT_Badge"]}" style="margin-left: 8px;">{d["TCT_Action"]}</span>{rs_html}{earn_html}<div style="font-size: 1.35rem; font-weight: 700; margin-top: 6px;">${d["Price"]:,.2f} <span style="font-size: 0.9rem; color: {"#15803d" if d["Change"]>=0 else "#b91c1c"}; font-weight: 700;">{arr_w}${abs(d["Change"]):.2f} ({d["Change_Pct"]:+.2f}%)</span></div></div><div style="text-align: right;"><div style="font-size: 1.6rem; font-weight: 700; color: #c5a059; font-family: Newsreader, serif;">{d["Score"]}</div><div style="font-size: 0.7rem; color: #71717a; text-transform: uppercase;">Score</div></div></div><div class="trade-ticket"><div style="display: flex; justify-content: space-between; font-weight: 700; color: #0f291e; margin-bottom: 4px;"><span>{d["TCT_Model"]}</span><span>📐 Reward/Risk: {d["R_Multiple"]:.1f}R</span></div><div style="display: flex; justify-content: space-between;"><span>🎯 <b>Buy Trigger:</b> ${d["BOS_Level"]:,.2f}</span><span>🟢 <b>Take Profit:</b> <span style="color:#15803d; font-weight:700;">${d["Target_Price"]:,.2f}</span> (+{d["Target_Pct"]:.1f}%)</span></div><div style="margin-top: 4px; display: flex; justify-content: space-between;"><span>🔴 <b>Stop-Loss:</b> <span style="color:#b91c1c; font-weight:700;">${d["Stop_Price"]:,.2f}</span> ({d["Stop_Pct"]:.1f}%)</span><span><b>0.5% Size:</b> {d["Shares_05Pct"]} shs (${d["Pos_Value"]:,.0f})</span></div></div><div style="display: flex; justify-content: space-between; align-items: center; margin-top: 8px; font-size: 0.78rem; color: #52525b;"><div>Day High: <b>${d["Day_High"]:,.2f}</b></div><div>Day Low: <b>${d["Day_Low"]:,.2f}</b></div><div>RSI(14/2): <b>{d["RSI"]:.0f}/{d["RSI2"]:.0f}</b></div><div>EMA 50: <b>${d["EMA50_Val"]:,.2f}</b></div></div><div style="font-size: 0.80rem; color: #475569; margin-top: 6px; font-style: italic;">"{d["TCT_Explain"]}"</div></div>',
                         unsafe_allow_html=True
                     )
 
