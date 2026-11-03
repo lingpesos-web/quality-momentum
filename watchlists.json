@@ -46,5 +46,8 @@
     "AVGO",
     "COST"
   ],
-  "Special Case Stocks": []
+  "Special Case Stocks": [],
+  "Active Positions": [
+    "ADPT"
+  ]
 }
