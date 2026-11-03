@@ -18,5 +18,15 @@
     "StopLoss": 9.54,
     "Target15": 12.19,
     "HalfSold": false
+  },
+  {
+    "id": "TEM_1793699996",
+    "Ticker": "TEM",
+    "BuyPrice": 77.22,
+    "Shares": 300,
+    "BuyDate": "2026-09-18",
+    "StopLoss": 69.498,
+    "Target15": 88.803,
+    "HalfSold": false
   }
 ]
