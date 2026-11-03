@@ -98,6 +98,106 @@ def send_ntfy_alert(message, title="Daily Portfolio Briefing"):
             return True, f"Delivered (HTTP {resp.status}) to topic '2026_USstockspicks'"
     except Exception as e:
         return False, f"ntfy error: {str(e)}"
+        import streamlit as st
+import streamlit.components.v1 as components
+import yfinance as yf
+import pandas as pd
+import numpy as np
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+import json
+import os
+import time
+import base64
+import urllib.request
+import urllib.parse
+import xml.etree.ElementTree as ET
+import email.utils
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
+from concurrent.futures import ThreadPoolExecutor
+
+st.set_page_config(
+    page_title="Quality Momentum & TCT Cockpit",
+    page_icon="📈",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+# --- INITIALIZE SESSION STATE & URL ROUTING ---
+for k, v in [
+    ("inspect_symbol", None),
+    ("rt_chart_symbol", None),
+    ("nav_radio", "Dashboard"),
+    ("screener_matches", None),
+    ("screener_title", None),
+    ("wl_preset_filter", "ALL"),
+    ("last_good_data", {})
+]:
+    if k not in st.session_state:
+        st.session_state[k] = v
+
+if "inspect" in st.query_params:
+    clicked_sym = st.query_params.get("inspect", "").strip().upper()
+    if clicked_sym:
+        st.session_state.inspect_symbol = clicked_sym
+    st.query_params.clear()
+
+if "rt_chart" in st.query_params:
+    rt_sym = st.query_params.get("rt_chart", "").strip().upper()
+    if rt_sym:
+        st.session_state.rt_chart_symbol = rt_sym
+        st.session_state.inspect_symbol = None
+        st.session_state.nav_radio = "⚡ Live Real-Time Quotes"
+    st.query_params.clear()
+
+def clear_inspection():
+    st.session_state.inspect_symbol = None
+    if "inspect" in st.query_params or "rt_chart" in st.query_params:
+        st.query_params.clear()
+
+# --- NTFY ALERT ENGINE (ASCII-SAFE HEADER) ---
+STATE_FILE = "alert_state.json"
+DATA_FILE = "watchlists.json"
+SETTINGS_FILE = "settings.json"
+GITHUB_REPO = "lingpesos-web/quality-momentum"
+GITHUB_BRANCH = "main"
+
+def load_json(filepath, default):
+    if os.path.exists(filepath):
+        try:
+            with open(filepath, "r") as f:
+                data = json.load(f)
+                if isinstance(data, dict) and data:
+                    return data
+        except Exception:
+            pass
+    return default
+
+def save_json(filepath, data):
+    try:
+        with open(filepath, "w") as f:
+            json.dump(data, f, indent=2)
+    except Exception:
+        pass
+
+def send_ntfy_alert(message, title="Daily Portfolio Briefing"):
+    try:
+        ascii_title = title.encode("ascii", "ignore").decode("ascii").strip() or "Market Alert"
+        req = urllib.request.Request(
+            "https://ntfy.sh/2026_USstockspicks",
+            data=message.encode("utf-8"),
+            headers={
+                "Title": ascii_title,
+                "Priority": "high",
+                "Content-Type": "text/plain; charset=utf-8"
+            },
+            method="POST"
+        )
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            return True, f"Delivered (HTTP {resp.status}) to topic '2026_USstockspicks'"
+    except Exception as e:
+        return False, f"ntfy error: {str(e)}"
 def check_and_fire_active_position_alerts(records):
     """Monitors logged positions in positions.json and sends live alerts if rules trigger."""
     if not records or not positions:
