@@ -24,43 +24,12 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# --- INITIALIZE SESSION STATE & URL ROUTING ---
-for k, v in [
-    ("inspect_symbol", None),
-    ("rt_chart_symbol", None),
-    ("nav_radio", "Dashboard"),
-    ("screener_matches", None),
-    ("screener_title", None),
-    ("wl_preset_filter", "ALL"),
-    ("last_good_data", {})
-]:
-    if k not in st.session_state:
-        st.session_state[k] = v
-
-if "inspect" in st.query_params:
-    clicked_sym = st.query_params.get("inspect", "").strip().upper()
-    if clicked_sym:
-        st.session_state.inspect_symbol = clicked_sym
-    st.query_params.clear()
-
-if "rt_chart" in st.query_params:
-    rt_sym = st.query_params.get("rt_chart", "").strip().upper()
-    if rt_sym:
-        st.session_state.rt_chart_symbol = rt_sym
-        st.session_state.inspect_symbol = None
-        st.session_state.nav_radio = "⚡ Live Real-Time Quotes"
-    st.query_params.clear()
-
-def clear_inspection():
-    st.session_state.inspect_symbol = None
-    if "inspect" in st.query_params or "rt_chart" in st.query_params:
-        st.query_params.clear()
-
-# --- NTFY ALERT ENGINE (ASCII-SAFE HEADER) ---
+# --- NTFY ALERT ENGINE & PERSISTENT STORAGE FILES ---
 STATE_FILE = "alert_state.json"
 DATA_FILE = "watchlists.json"
 POSITIONS_FILE = "positions.json"
 SETTINGS_FILE = "settings.json"
+UI_STATE_FILE = "ui_state.json"
 GITHUB_REPO = "lingpesos-web/quality-momentum"
 GITHUB_BRANCH = "main"
 
@@ -81,6 +50,66 @@ def save_json(filepath, data):
             json.dump(data, f, indent=2)
     except Exception:
         pass
+
+DEFAULT_UI_STATE = {
+    "nav_radio": "Dashboard",
+    "wl_folder": "Active Portfolio",
+    "live_folder": "Active Portfolio",
+    "wl_preset_filter": "ALL",
+    "screener_tickers": None,
+    "screener_title": None
+}
+
+saved_ui = load_json(UI_STATE_FILE, DEFAULT_UI_STATE)
+if not isinstance(saved_ui, dict):
+    saved_ui = dict(DEFAULT_UI_STATE)
+
+# --- INITIALIZE SESSION STATE & URL ROUTING (PERSISTS ACROSS BACK BUTTON & IPAD APP SWITCHING) ---
+for k, v in [
+    ("inspect_symbol", None),
+    ("rt_chart_symbol", None),
+    ("nav_radio", saved_ui.get("nav_radio", "Dashboard")),
+    ("wl_folder_radio", saved_ui.get("wl_folder", "Active Portfolio")),
+    ("live_folder_sel", saved_ui.get("live_folder", "Active Portfolio")),
+    ("screener_matches", None),
+    ("screener_tickers", saved_ui.get("screener_tickers", None)),
+    ("screener_title", saved_ui.get("screener_title", None)),
+    ("wl_preset_filter", saved_ui.get("wl_preset_filter", "ALL")),
+    ("last_good_data", {})
+]:
+    if k not in st.session_state:
+        st.session_state[k] = v
+
+def persist_ui_state():
+    save_json(UI_STATE_FILE, {
+        "nav_radio": st.session_state.get("nav_radio", "Dashboard"),
+        "wl_folder": st.session_state.get("wl_folder_radio", "Active Portfolio"),
+        "live_folder": st.session_state.get("live_folder_sel", "Active Portfolio"),
+        "wl_preset_filter": st.session_state.get("wl_preset_filter", "ALL"),
+        "screener_tickers": st.session_state.get("screener_tickers", None),
+        "screener_title": st.session_state.get("screener_title", None)
+    })
+
+if "inspect" in st.query_params:
+    clicked_sym = st.query_params.get("inspect", "").strip().upper()
+    if clicked_sym:
+        st.session_state.inspect_symbol = clicked_sym
+    st.query_params.clear()
+
+if "rt_chart" in st.query_params:
+    rt_sym = st.query_params.get("rt_chart", "").strip().upper()
+    if rt_sym:
+        st.session_state.rt_chart_symbol = rt_sym
+        st.session_state.inspect_symbol = None
+        st.session_state.nav_radio = "⚡ Live Real-Time Quotes"
+        persist_ui_state()
+    st.query_params.clear()
+
+def clear_inspection():
+    st.session_state.inspect_symbol = None
+    if "inspect" in st.query_params or "rt_chart" in st.query_params:
+        st.query_params.clear()
+    persist_ui_state()
 
 def send_ntfy_alert(message, title="Daily Portfolio Briefing"):
     try:
@@ -238,7 +267,8 @@ GICS_SECTORS = {
     "Energy, Nuclear & Precious Metals": ["CEG", "VST", "NRG", "TLN", "OKLO", "SMR", "CCJ", "UEC", "NXE", "DNN", "NEE", "SO", "DUK", "GEV", "XOM", "CVX", "COP", "EOG", "SLB", "HAL", "NEM", "AEM", "WPM", "FNV", "PAAS", "AG", "CDE", "HL", "FCX", "SLV", "GLD"],
     "Industrials, Defense & Infrastructure": ["GE", "CAT", "ETN", "PWR", "EME", "FIX", "URI", "PH", "TT", "CARR", "RTX", "LMT", "NOC", "GD", "LHX", "HII", "AXON", "TDG", "HEI", "HWM", "UNP", "CSX", "FDX", "UPS", "DE", "HON", "WM", "RSG"],
     "Health Care & Biotech Innovators": ["LLY", "NVO", "VRTX", "REGN", "AMGN", "GILD", "ISRG", "SYK", "BSX", "MDT", "ABT", "TMO", "DHR", "UNH", "ELV", "CI", "HCA", "IDXX", "DXCM", "PODD", "ADPT", "TEM", "EXAS", "NTRA", "GH", "TWST", "CRSP", "NTLA", "BEAM", "VKTX"],
-    "Consumer & Retail Powerhouses": ["WMT", "COST", "TGT", "HD", "LOW", "TJX", "ROST", "NKE", "ONON", "DECK", "LULU", "SBUX", "CMG", "CAVA", "SHAK", "MCD", "YUM", "DPZ", "PG", "KO", "PEP", "PM"]
+    "Consumer & Retail Powerhouses": ["WMT", "COST", "TGT", "HD", "LOW", "TJX", "ROST", "NKE", "ONON", "DECK", "LULU", "SBUX", "CMG", "CAVA", "SHAK", "MCD", "YUM", "DPZ", "PG", "KO", "PEP", "PM"],
+    "Indexes, Precious Metals & Crypto": ["^GSPC", "^DJI", "^IXIC", "GC=F", "SI=F", "HG=F", "PL=F", "GLD", "SLV", "BTC-USD", "ETH-USD", "SOL-USD", "XRP-USD", "DX-Y.NYB", "JPY=X", "EURUSD=X"]
 }
 
 BLOCKED_NEWS_SOURCES = {"marketbeat", "zacks", "defense world", "etf daily news", "ticker report", "american banking news", "simply wall st", "stocknews.com", "wall street zen", "holdings channel", "transcript daily", "modern readers", "watch list news", "stocktwits", "stockwits"}
@@ -394,6 +424,15 @@ def analyze_six_playbooks(df, account_size=100000, spy_ret_63d=0.0, df_1h=None):
     ema20 = float(df["EMA20"].iloc[-1])
     ema50 = float(df["EMA50"].iloc[-1])
     ema200 = float(df["EMA200"].iloc[-1]) if len(df) >= 200 else ema50
+    if "SMA150" not in df.columns:
+        df["SMA150"] = df["Close"].rolling(150, min_periods=1).mean()
+    sma150_arr = df["SMA150"].values.astype(float)
+    sma150 = float(sma150_arr[-1])
+    sma150_20d_ago = float(sma150_arr[-20]) if n >= 20 else sma150
+    sma150_rising = bool(sma150 >= sma150_20d_ago * 0.9985)
+    below_sma150 = bool(curr_close < sma150)
+    ma5 = float(pd.Series(close_arr[-10:]).rolling(5, min_periods=1).mean().iloc[-1])
+    ma10 = float(pd.Series(close_arr[-15:]).rolling(10, min_periods=1).mean().iloc[-1])
 
     delta = df["Close"].diff()
     g2 = delta.where(delta > 0, 0.0).ewm(alpha=1/2, adjust=False).mean()
@@ -459,9 +498,37 @@ def analyze_six_playbooks(df, account_size=100000, spy_ret_63d=0.0, df_1h=None):
                 break
 
     high_20d_prev = float(np.max(high_arr[-21:-1])) if n >= 22 else curr_close
+    high_20d_curr = float(np.max(high_arr[-20:])) if n >= 20 else curr_close
     high_5d_prev = float(np.max(high_arr[-6:-1])) if n >= 7 else curr_close
     high_3d_prev = float(np.max(high_arr[-4:-1])) if n >= 5 else curr_close
     low_3d = float(np.min(low_arr[-3:]))
+
+    # --- 掃地僧 / STAN WEINSTEIN 150-DAY MA STRATEGIES ---
+    # 1) 🔔 150-MA Reversal Radar (Just broke back above 150-Day MA -> Early Research Alert)
+    lb_rev = min(n, 30)
+    bars_below_150 = int(np.sum(close_arr[-lb_rev:-1] < sma150_arr[-lb_rev:-1])) if lb_rev > 3 else 0
+    is_150ma_reversal_radar = bool(
+        (curr_close >= sma150) and
+        (curr_close <= sma150 * 1.075) and
+        (bars_below_150 >= 3)
+    )
+
+    # 2) 📈 Stage 2 Higher Low (第二階段・回調低點 -> Ideal Pullback Bounce Entry)
+    recent_pb_low = float(np.min(low_arr[-12:])) if n >= 12 else float(low_arr[-1])
+    prior_pb_low = float(np.min(low_arr[-38:-12])) if n >= 38 else sma150
+    pulled_back_from_high = (recent_pb_low <= high_20d_curr * 0.982) and (curr_close <= high_20d_curr * 0.994)
+    near_rising_support = (recent_pb_low <= max(ema20, ema50) * 1.032) and (recent_pb_low > sma150 * 1.002)
+    higher_low_intact = recent_pb_low > prior_pb_low * 1.002
+    turning_up_trigger = (curr_close > recent_pb_low * 1.003) and (curr_close >= open_arr[-1] or curr_close > prev_close or ma5 >= ma10 * 0.998)
+    is_stage2_higher_low = bool(
+        (curr_close > sma150 * 1.015) and
+        sma150_rising and
+        (ema50 >= sma150 * 0.985) and
+        higher_low_intact and
+        pulled_back_from_high and
+        near_rising_support and
+        turning_up_trigger
+    )
 
     is_pure_momentum = (curr_close > ema20) and (curr_close > ema50) and (curr_close > ema200) and rs_leader and (55 <= rsi14 <= 75)
     is_20d_breakout = (curr_close >= high_20d_prev) and (paced_rvol >= 1.25) and (curr_close > ema50)
@@ -478,6 +545,20 @@ def analyze_six_playbooks(df, account_size=100000, spy_ret_63d=0.0, df_1h=None):
         entry_ref = curr_close if curr_close >= bos_level else bos_level
         effective_stop = max(min(tap3_price - (0.5 * atr14_1h_est), entry_ref * 0.98), entry_ref * 0.93)
         target_price = range_high
+    elif is_stage2_higher_low:
+        playbook_name = "📈 Playbook 7: Stage 2 Higher Low (低點)"
+        playbook_cat = "STAGE2_HL"
+        bos_level = max(float(high_arr[-2]), curr_close) if curr_close < prev_close else curr_close
+        entry_ref = curr_close
+        effective_stop = max(min(recent_pb_low - 0.35 * atr14_daily, sma150), curr_close * 0.935)
+        target_price = max(high_20d_curr * 1.03, entry_ref + 2.5 * (entry_ref - effective_stop))
+    elif is_150ma_reversal_radar:
+        playbook_name = "🔔 Playbook 8: 150-MA Reversal Radar"
+        playbook_cat = "REVERSAL_150"
+        bos_level = high_5d_prev if curr_close < high_5d_prev else curr_close
+        entry_ref = curr_close
+        effective_stop = max(sma150 - 0.5 * atr14_daily, curr_close * 0.93)
+        target_price = entry_ref + 2.5 * (entry_ref - effective_stop)
     elif is_20d_breakout:
         playbook_name = "🚀 Playbook 2: 20D Momentum Breakout"
         playbook_cat = "BREAKOUT"
@@ -533,12 +614,18 @@ def analyze_six_playbooks(df, account_size=100000, spy_ret_63d=0.0, df_1h=None):
     if tct_valid_range and curr_close >= bos_level and r_multiple >= 1.9:
         act, badge, dot, short_s, prio = "BUY NOW (TCT BOS)", "badge-tct-buy", "🟢", "🟢 Buy Now", 0
         expl = f"TCT accumulation breakout above BOS (${bos_level:,.2f}) targeting Range High (${target_price:,.2f})."
+    elif is_stage2_higher_low:
+        act, badge, dot, short_s, prio = "STAGE 2 HIGHER LOW (低點 BUY)", "badge-tct-buy", "📈", "📈 Stage2 低點", 0
+        expl = f"掃地僧 Stage 2 Higher Low (低點): Uptrend above rising 150-MA (${sma150:,.2f}), Higher Low at ${recent_pb_low:,.2f} > prior low (${prior_pb_low:,.2f}), bouncing up!"
     elif is_20d_breakout or is_gap_ignition:
         act, badge, dot, short_s, prio = "BUY NOW (BREAKOUT)", "badge-tct-buy", "🟢", "🟢 Buy Now", 0
         expl = f"{playbook_name}: Breakout above ${bos_level:,.2f} on {paced_rvol:.1f}x pace volume."
     elif is_squeeze_breakout or is_holy_grail_pullback:
         act, badge, dot, short_s, prio = "SWING BUY (PULLBACK/COIL)", "badge-tct-buy", "🎯", "🎯 Swing Buy", 0
         expl = f"{playbook_name}: High-probability swing entry near ${entry_ref:,.2f}, stop ${effective_stop:,.2f}."
+    elif is_150ma_reversal_radar:
+        act, badge, dot, short_s, prio = "🔔 150-MA REVERSAL (RESEARCH)", "badge-tct-watch", "🔔", "🔔 150MA Radar", 1
+        expl = f"Just crossed back above 150-Day MA (${sma150:,.2f})! Early Stage 2 reversal radar — start researching & watch for the next Higher Low (低點)."
     elif is_rsi2_snapback:
         act, badge, dot, short_s, prio = "SWING BUY (OVERSOLD)", "badge-tct-watch", "🪃", "🪃 Oversold", 1
         expl = f"RSI-2 extreme oversold ({rsi2:.0f}) above 200-EMA. Target bounce to ${target_price:,.2f}."
@@ -551,6 +638,9 @@ def analyze_six_playbooks(df, account_size=100000, spy_ret_63d=0.0, df_1h=None):
     elif curr_close > ema50 and (curr_close >= ema20 * 0.99 or crossed_5d):
         act, badge, dot, short_s, prio = "HOLD / BUY DIP", "badge-trend", "🔵", "🔵 Uptrend", 2
         expl = f"Strong uptrend above 20 & 50 EMA. Swing target ${target_price:,.2f}, stop ${effective_stop:,.2f}."
+    elif below_sma150 and not tct_valid_range and not is_rsi2_snapback:
+        act, badge, dot, short_s, prio = "BROKE 150-MA (CUT LOSS)", "badge-tct-sell", "🔴", "🔴 Below 150MA", 4
+        expl = f"Stage 4 Warning: Below 150-day MA (${sma150:,.2f}). Cut loss / avoid until price reclaims 150-MA."
     elif curr_close < ema50 and not tct_valid_range and not is_rsi2_snapback:
         act, badge, dot, short_s, prio = "SELL / AVOID", "badge-tct-sell", "🔴", "🔴 Below 50", 4
         expl = f"Below 50-day EMA (${ema50:,.2f}) without a valid TCT bottom box. Protect capital."
@@ -567,7 +657,8 @@ def analyze_six_playbooks(df, account_size=100000, spy_ret_63d=0.0, df_1h=None):
         "Target_Pct": target_gain_pct, "Stop_Pct": stop_loss_pct, "Shares_05Pct": suggested_shares,
         "Pos_Value": position_value, "Dollar_Vol_M": dollar_vol_20 / 1e6, "RS_Diff": rs_diff,
         "RS_Leader": rs_leader, "RSI2": rsi2, "Paced_RVOL": paced_rvol, "Is_Oversold_Swing": is_rsi2_snapback,
-        "Is_Pure_Momentum": is_pure_momentum
+        "Is_Pure_Momentum": is_pure_momentum, "Is_Stage2_Higher_Low": is_stage2_higher_low,
+        "Is_150MA_Reversal_Radar": is_150ma_reversal_radar, "Below_SMA150": below_sma150
     }
 
 def check_and_fire_active_position_alerts(records):
@@ -624,11 +715,14 @@ def check_and_fire_live_ntfy(records):
             state = {"date": today_et, "alerted": []}
         alerted = set(state.get("alerted", []))
 
-        new_buys, new_targets, new_stops = [], [], []
+        new_buys, new_reversals, new_targets, new_stops = [], [], [], []
         for sym, d in records.items():
             if d["TCT_Priority"] == 0 and f"{sym}_BUY" not in alerted:
                 new_buys.append(f"{sym} ({d['TCT_Short_Sig']} @ ${d['Price']:,.2f} -> Tgt ${d['Target_Price']:,.2f})")
                 alerted.add(f"{sym}_BUY")
+            if d.get("Is_150MA_Reversal_Radar") and f"{sym}_REV150" not in alerted:
+                new_reversals.append(f"{sym} (${d['Price']:,.2f} > 150MA ${d.get('SMA150_Val', d['Price']):,.2f})")
+                alerted.add(f"{sym}_REV150")
             if d["Price"] >= d["Target_Price"] * 0.996 and f"{sym}_TGT" not in alerted:
                 new_targets.append(f"{sym} Hit Target (${d['Price']:,.2f} >= ${d['Target_Price']:,.2f})")
                 alerted.add(f"{sym}_TGT")
@@ -636,10 +730,12 @@ def check_and_fire_live_ntfy(records):
                 new_stops.append(f"{sym} Hit Stop (${d['Price']:,.2f} <= ${d['Stop_Price']:,.2f})")
                 alerted.add(f"{sym}_STOP")
 
-        if new_buys or new_targets or new_stops:
+        if new_buys or new_reversals or new_targets or new_stops:
             lines = []
             if new_buys:
-                lines.append("🟢 INSTANT BUY TRIGGER: " + ", ".join(new_buys[:6]))
+                lines.append("🟢 INSTANT BUY / STAGE 2 低點: " + ", ".join(new_buys[:6]))
+            if new_reversals:
+                lines.append("🔔 150-MA REVERSAL RADAR (RESEARCH): " + ", ".join(new_reversals[:6]))
             if new_targets:
                 lines.append("🎯 TAKE PROFIT HIT: " + ", ".join(new_targets[:6]))
             if new_stops:
@@ -1216,7 +1312,11 @@ else:
 
         ctrl1, ctrl2, ctrl3, ctrl4, ctrl5, ctrl6, ctrl7 = st.columns([1.8, 1.9, 1.9, 1.3, 1.3, 0.8, 1.1])
         with ctrl1:
-            selected_live_folder = st.selectbox("Watchlist", folder_options, index=0, label_visibility="collapsed")
+            default_live_idx = folder_options.index(st.session_state.get("live_folder_sel")) if st.session_state.get("live_folder_sel") in folder_options else 0
+            selected_live_folder = st.selectbox("Watchlist", folder_options, index=default_live_idx, label_visibility="collapsed")
+            if selected_live_folder != st.session_state.get("live_folder_sel"):
+                st.session_state.live_folder_sel = selected_live_folder
+                persist_ui_state()
         with ctrl2:
             live_board_mode = st.selectbox("Board Mode", ["📊 Custom Signal Board (Large Font)", "⚡ TradingView Streaming (Tick-by-Tick)"], index=0, label_visibility="collapsed")
         with ctrl3:
@@ -1482,48 +1582,73 @@ else:
             """, height=485)
 
     elif navigation == "Screener":
-        st.markdown("<h1>6-Playbook Market Screener</h1>", unsafe_allow_html=True)
-        st.markdown("<p style='color: #52525b; margin-top: -12px;'>Use the One-Tap Strategy Presets below or build a custom scan across ~220 liquid US stocks.</p>", unsafe_allow_html=True)
+        st.markdown("<h1>Multi-Playbook & Stage 2 Market Screener</h1>", unsafe_allow_html=True)
+        st.markdown("<p style='color: #52525b; margin-top: -12px;'>Use the One-Tap Strategy Presets (including 掃地僧 Stage 2 低點 & 150-MA Reversal Radar) across Stocks, Indexes, Precious Metals & Crypto.</p>", unsafe_allow_html=True)
 
         all_watchlist_syms = get_all_monitored_tickers()
+        mcf_extra = GICS_SECTORS.get("Indexes, Precious Metals & Crypto", [])
         full_market_syms = list(dict.fromkeys([s for s_list in GICS_SECTORS.values() for s in s_list] + all_watchlist_syms))
 
         universe_mode = st.radio(
             "1. Choose Scan Universe",
-            [f"Expanded Liquid Market (~{len(full_market_syms)} Top US Stocks)", f"My Watchlists Only ({len(all_watchlist_syms)} Stocks — Instant)", "Custom Sector Selection below"],
+            [
+                f"Expanded Market + Indexes, Metals & Crypto (~{len(full_market_syms)} Assets)",
+                f"My Watchlists + Indexes, Metals & Crypto ({len(list(dict.fromkeys(all_watchlist_syms + mcf_extra)))} Assets — Instant)",
+                "Custom Sector Selection below"
+            ],
             horizontal=True
         )
 
         def get_target_universe(selected_secs):
             if universe_mode.startswith("My Watchlists"):
-                return all_watchlist_syms
-            elif universe_mode.startswith("Expanded Liquid"):
+                return list(dict.fromkeys(all_watchlist_syms + mcf_extra))
+            elif universe_mode.startswith("Expanded Market"):
                 return full_market_syms
             return list(dict.fromkeys([s for sc in selected_secs for s in GICS_SECTORS[sc]]))
 
-        st.markdown("### 2. One-Tap 6-Playbook Strategy Preset Scans")
-        p_col1, p_col2, p_col3, p_col4, p_col5 = st.columns(5)
+        def _save_screener_results(match_list, title_str):
+            st.session_state.screener_matches = match_list
+            st.session_state.screener_tickers = [m["Ticker"] for m in match_list]
+            st.session_state.screener_title = title_str
+            persist_ui_state()
 
-        if p_col1.button("🔥 Pure Momentum Leaders", use_container_width=True, type="primary"):
+        st.markdown("### 2. One-Tap Strategy Preset Scans (Stage 2 低點 · 150-MA Radar · Momentum · TCT)")
+        r1_c1, r1_c2, r1_c3, r1_c4 = st.columns(4)
+        r2_c1, r2_c2, r2_c3, r2_c4 = st.columns(4)
+
+        if r1_c1.button("📈 Stage 2 Higher Low (低點 Buy)", use_container_width=True, type="primary"):
             s_data = fetch_batch_market_data(get_target_universe(list(GICS_SECTORS.keys())), account_size=settings["account_size"])
-            st.session_state.screener_matches = sorted([d for d in s_data.values() if d["Is_Pure_Momentum"]], key=lambda x: -x["RS_Diff"])
-            st.session_state.screener_title = "🔥 Pure Momentum Leaders (RS+, Price>20/50/200, RSI 55-75)"
-        if p_col2.button("🟢 All 'BUY NOW'", use_container_width=True):
+            res_l = sorted([d for d in s_data.values() if d.get("Is_Stage2_Higher_Low")], key=lambda x: -x["Score"])
+            _save_screener_results(res_l, "📈 掃地僧 Stage 2 Higher Low (第二階段・回調低點 — Ideal Entry)")
+        if r1_c2.button("🔔 150-MA Reversal Radar (Research)", use_container_width=True, type="primary"):
             s_data = fetch_batch_market_data(get_target_universe(list(GICS_SECTORS.keys())), account_size=settings["account_size"])
-            st.session_state.screener_matches = sorted([d for d in s_data.values() if d["TCT_Priority"] == 0], key=lambda x: -x["Score"])
-            st.session_state.screener_title = "🟢 All Immediate 'BUY NOW' & 'SWING BUY' Triggers"
-        if p_col3.button("📐 TCT Bottoms", use_container_width=True):
+            res_l = sorted([d for d in s_data.values() if d.get("Is_150MA_Reversal_Radar")], key=lambda x: -x["Score"])
+            _save_screener_results(res_l, "🔔 Just Broke Back Above 150-Day MA (Early Trend Reversal Radar — Start Research)")
+        if r1_c3.button("🔥 Pure Momentum Leaders", use_container_width=True):
             s_data = fetch_batch_market_data(get_target_universe(list(GICS_SECTORS.keys())), account_size=settings["account_size"])
-            st.session_state.screener_matches = sorted([d for d in s_data.values() if d["TCT_Valid_Range"]], key=lambda x: (x["TCT_Priority"], -x["R_Multiple"]))
-            st.session_state.screener_title = "📐 Playbook 1: Valid 25+ Bar TCT Accumulation Boxes"
-        if p_col4.button("🎯 Pullback & Coil", use_container_width=True):
+            res_l = sorted([d for d in s_data.values() if d["Is_Pure_Momentum"]], key=lambda x: -x["RS_Diff"])
+            _save_screener_results(res_l, "🔥 Pure Momentum Leaders (RS+, Price>20/50/200, RSI 55-75)")
+        if r1_c4.button("🟢 All 'BUY NOW' Triggers", use_container_width=True):
             s_data = fetch_batch_market_data(get_target_universe(list(GICS_SECTORS.keys())), account_size=settings["account_size"])
-            st.session_state.screener_matches = sorted([d for d in s_data.values() if d["Playbook_Cat"] == "SWING_PULLBACK"], key=lambda x: -x["Score"])
-            st.session_state.screener_title = "🎯 Playbooks 3 & 4: 20-EMA Pullback & Volatility Squeeze Swings"
-        if p_col5.button("🚀 20D Breakouts", use_container_width=True):
+            res_l = sorted([d for d in s_data.values() if d["TCT_Priority"] == 0], key=lambda x: -x["Score"])
+            _save_screener_results(res_l, "🟢 All Immediate 'BUY NOW' & 'SWING BUY' Triggers")
+
+        if r2_c1.button("📐 TCT Bottom Boxes", use_container_width=True):
             s_data = fetch_batch_market_data(get_target_universe(list(GICS_SECTORS.keys())), account_size=settings["account_size"])
-            st.session_state.screener_matches = sorted([d for d in s_data.values() if d["Playbook_Cat"] == "BREAKOUT"], key=lambda x: -x["Score"])
-            st.session_state.screener_title = "🚀 Playbooks 2 & 6: Momentum & High-Volume Gap Breakouts"
+            res_l = sorted([d for d in s_data.values() if d["TCT_Valid_Range"]], key=lambda x: (x["TCT_Priority"], -x["R_Multiple"]))
+            _save_screener_results(res_l, "📐 Playbook 1: Valid 25+ Bar TCT Accumulation Boxes")
+        if r2_c2.button("🎯 20-EMA Pullback & Coil", use_container_width=True):
+            s_data = fetch_batch_market_data(get_target_universe(list(GICS_SECTORS.keys())), account_size=settings["account_size"])
+            res_l = sorted([d for d in s_data.values() if d["Playbook_Cat"] == "SWING_PULLBACK"], key=lambda x: -x["Score"])
+            _save_screener_results(res_l, "🎯 Playbooks 3 & 4: 20-EMA Pullback & Volatility Squeeze Swings")
+        if r2_c3.button("🚀 20D & Gap Breakouts", use_container_width=True):
+            s_data = fetch_batch_market_data(get_target_universe(list(GICS_SECTORS.keys())), account_size=settings["account_size"])
+            res_l = sorted([d for d in s_data.values() if d["Playbook_Cat"] == "BREAKOUT"], key=lambda x: -x["Score"])
+            _save_screener_results(res_l, "🚀 Playbooks 2 & 6: Momentum & High-Volume Gap Breakouts")
+        if r2_c4.button("🪃 RSI-2 Oversold Bounce", use_container_width=True):
+            s_data = fetch_batch_market_data(get_target_universe(list(GICS_SECTORS.keys())), account_size=settings["account_size"])
+            res_l = sorted([d for d in s_data.values() if d["Is_Oversold_Swing"]], key=lambda x: x["RSI2"])
+            _save_screener_results(res_l, "🪃 Playbook 5: RSI-2 Extreme Oversold Snapback Swings")
 
         with st.expander("Optional: Custom Sector & Technical Filter Builder", expanded=False):
             f_col1, f_col2, f_col3 = st.columns([1.2, 1.4, 1.4])
@@ -1534,11 +1659,13 @@ else:
                 s1 = st.checkbox("RSI Rising Above 55 (Momentum)", value=False)
                 s4 = st.checkbox("20-Day High Breakout (Volume Confirmed)", value=False)
                 s7 = st.checkbox("Pullback Near 20D or 50D EMA Support", value=False)
+                s_st2 = st.checkbox("📈 Stage 2 Higher Low (低點) Pattern Only", value=False)
             with f_col3:
                 tct1 = st.checkbox("🟢 Action = 'BUY NOW' / 'SWING BUY'", value=False)
                 tct2 = st.checkbox("📐 True TCT Bottom Accumulation Box Only", value=False)
                 tct4 = st.checkbox("Reward-to-Risk ≥ 2.0R to Target", value=False)
                 tct5 = st.checkbox("Liquidity (20D Dollar Volume ≥ $50M)", value=False)
+                s_rev150 = st.checkbox("🔔 Just Broke Back Above 150-Day MA (Radar)", value=False)
 
             if st.button("Run Custom Filter Scan", type="primary"):
                 s_data = fetch_batch_market_data(get_target_universe(selected_sectors), account_size=settings["account_size"])
@@ -1548,13 +1675,24 @@ else:
                     if s1 and d["RSI"] < 55: continue
                     if s4 and not d["Is_Breakout"]: continue
                     if s7 and not d["Pullback_EMA50"]: continue
+                    if s_st2 and not d.get("Is_Stage2_Higher_Low"): continue
+                    if s_rev150 and not d.get("Is_150MA_Reversal_Radar"): continue
                     if tct1 and d["TCT_Priority"] != 0: continue
                     if tct2 and not d["TCT_Valid_Range"]: continue
                     if tct4 and not d["TCT_2R_Pass"]: continue
                     if tct5 and not d["TCT_Liq_50M"]: continue
                     matches.append(d)
-                st.session_state.screener_matches = sorted(matches, key=lambda x: (x["TCT_Priority"], -x["Score"]))
-                st.session_state.screener_title = f"Custom Filter Scan ({len(matches)} Matches)"
+                res_l = sorted(matches, key=lambda x: (x["TCT_Priority"], -x["Score"]))
+                _save_screener_results(res_l, f"Custom Filter Scan ({len(res_l)} Matches)")
+
+        # Restore screener_matches from persisted screener_tickers if returning from stock dossier (Back button)
+        if st.session_state.screener_matches is None and st.session_state.get("screener_tickers") is not None:
+            saved_tks = st.session_state.get("screener_tickers", [])
+            if saved_tks:
+                restored_data = fetch_batch_market_data(saved_tks, account_size=settings["account_size"])
+                st.session_state.screener_matches = [restored_data[tk] for tk in saved_tks if tk in restored_data]
+            else:
+                st.session_state.screener_matches = []
 
         if st.session_state.screener_matches is not None:
             st.markdown("---")
@@ -1592,9 +1730,14 @@ else:
                             st.success("Synced!")
 
     elif navigation == "Watchlist":
-        st.markdown("<h1>Watchlists & 6-Playbook Action Tickets</h1>", unsafe_allow_html=True)
+        st.markdown("<h1>Watchlists & Multi-Playbook Action Tickets</h1>", unsafe_allow_html=True)
 
-        folder = st.radio("Select Watchlist Folder", list(watchlists.keys()), horizontal=True)
+        wl_keys = list(watchlists.keys())
+        default_wl_idx = wl_keys.index(st.session_state.get("wl_folder_radio")) if st.session_state.get("wl_folder_radio") in wl_keys else 0
+        folder = st.radio("Select Watchlist Folder", wl_keys, index=default_wl_idx, horizontal=True)
+        if folder != st.session_state.get("wl_folder_radio"):
+            st.session_state.wl_folder_radio = folder
+            persist_ui_state()
         
         if folder == "Active Positions":
             st.markdown("### 💼 My Active Positions & Rule Enforcer")
@@ -1705,19 +1848,23 @@ else:
                 render_watchlist_reorder_panel(folder, key_prefix="wl_ed")
 
             st.markdown("**One-Tap Strategy Playbook Filter:**")
-            wf1, wf2, wf3, wf4, wf5, wf6 = st.columns(6)
-            if wf1.button("🔥 Momentum", use_container_width=True, type="primary" if st.session_state.wl_preset_filter == "MOMENTUM" else "secondary"):
-                st.session_state.wl_preset_filter = "MOMENTUM"; st.rerun()
-            if wf2.button("🟢 Buy Triggers", use_container_width=True, type="primary" if st.session_state.wl_preset_filter == "BUY" else "secondary"):
-                st.session_state.wl_preset_filter = "BUY"; st.rerun()
-            if wf3.button("📐 TCT Bottoms", use_container_width=True, type="primary" if st.session_state.wl_preset_filter == "TCT" else "secondary"):
-                st.session_state.wl_preset_filter = "TCT"; st.rerun()
-            if wf4.button("🎯 Swings", use_container_width=True, type="primary" if st.session_state.wl_preset_filter == "SWING" else "secondary"):
-                st.session_state.wl_preset_filter = "SWING"; st.rerun()
-            if wf5.button("🪃 Oversold", use_container_width=True, type="primary" if st.session_state.wl_preset_filter == "OVERSOLD" else "secondary"):
-                st.session_state.wl_preset_filter = "OVERSOLD"; st.rerun()
-            if wf6.button("📋 Show All", use_container_width=True, type="primary" if st.session_state.wl_preset_filter == "ALL" else "secondary"):
-                st.session_state.wl_preset_filter = "ALL"; st.rerun()
+            wf1, wf2, wf3, wf4, wf5, wf6, wf7, wf8 = st.columns(8)
+            if wf1.button("📈 Stage 2 低點", use_container_width=True, type="primary" if st.session_state.wl_preset_filter == "STAGE2_HL" else "secondary"):
+                st.session_state.wl_preset_filter = "STAGE2_HL"; persist_ui_state(); st.rerun()
+            if wf2.button("🔔 150MA Radar", use_container_width=True, type="primary" if st.session_state.wl_preset_filter == "REV150" else "secondary"):
+                st.session_state.wl_preset_filter = "REV150"; persist_ui_state(); st.rerun()
+            if wf3.button("🔥 Momentum", use_container_width=True, type="primary" if st.session_state.wl_preset_filter == "MOMENTUM" else "secondary"):
+                st.session_state.wl_preset_filter = "MOMENTUM"; persist_ui_state(); st.rerun()
+            if wf4.button("🟢 Buy Triggers", use_container_width=True, type="primary" if st.session_state.wl_preset_filter == "BUY" else "secondary"):
+                st.session_state.wl_preset_filter = "BUY"; persist_ui_state(); st.rerun()
+            if wf5.button("📐 TCT Bottoms", use_container_width=True, type="primary" if st.session_state.wl_preset_filter == "TCT" else "secondary"):
+                st.session_state.wl_preset_filter = "TCT"; persist_ui_state(); st.rerun()
+            if wf6.button("🎯 Swings", use_container_width=True, type="primary" if st.session_state.wl_preset_filter == "SWING" else "secondary"):
+                st.session_state.wl_preset_filter = "SWING"; persist_ui_state(); st.rerun()
+            if wf7.button("🔴 <150MA Cut", use_container_width=True, type="primary" if st.session_state.wl_preset_filter == "CUT150" else "secondary"):
+                st.session_state.wl_preset_filter = "CUT150"; persist_ui_state(); st.rerun()
+            if wf8.button("📋 Show All", use_container_width=True, type="primary" if st.session_state.wl_preset_filter == "ALL" else "secondary"):
+                st.session_state.wl_preset_filter = "ALL"; persist_ui_state(); st.rerun()
 
             pills_html = "".join([f'<a href="?inspect={s}" target="_self" class="pill">{i+1}. {s}</a>' for i, s in enumerate(symbols)])
             st.markdown(f"<div style='margin: 8px 0;'>{pills_html}</div>", unsafe_allow_html=True)
@@ -1728,11 +1875,13 @@ else:
 
             display_symbols = [s for s in symbols if s in data_dict]
             flt = st.session_state.wl_preset_filter
-            if flt == "MOMENTUM": display_symbols = [s for s in display_symbols if data_dict[s]["Is_Pure_Momentum"]]
+            if flt == "STAGE2_HL": display_symbols = [s for s in display_symbols if data_dict[s].get("Is_Stage2_Higher_Low")]
+            elif flt == "REV150": display_symbols = [s for s in display_symbols if data_dict[s].get("Is_150MA_Reversal_Radar")]
+            elif flt == "MOMENTUM": display_symbols = [s for s in display_symbols if data_dict[s]["Is_Pure_Momentum"]]
             elif flt == "BUY": display_symbols = [s for s in display_symbols if data_dict[s]["TCT_Priority"] == 0]
             elif flt == "TCT": display_symbols = [s for s in display_symbols if data_dict[s]["TCT_Valid_Range"]]
             elif flt == "SWING": display_symbols = [s for s in display_symbols if data_dict[s]["Playbook_Cat"] == "SWING_PULLBACK"]
-            elif flt == "OVERSOLD": display_symbols = [s for s in display_symbols if data_dict[s]["Is_Oversold_Swing"]]
+            elif flt == "CUT150": display_symbols = [s for s in display_symbols if data_dict[s].get("Below_SMA150")]
 
             if sort_by == "Action Signal (Buy Now First)":
                 display_symbols = sorted(display_symbols, key=lambda s: (data_dict[s]["TCT_Priority"], -data_dict[s]["Score"]))
@@ -1861,13 +2010,17 @@ else:
             st.subheader("Push Notifications (Live & Daily Briefing)")
             current_data = fetch_batch_market_data(get_all_monitored_tickers(), account_size=settings["account_size"])
             if st.button("🔔 Send Live 6-Playbook Briefing Ping to iPad Now", type="primary"):
+                st2_hl = [f"{k} (${v['Price']:.2f})" for k, v in current_data.items() if v.get("Is_Stage2_Higher_Low")]
+                rev_150 = [f"{k} (${v['Price']:.2f} > 150MA ${v.get('SMA150_Val', v['Price']):.2f})" for k, v in current_data.items() if v.get("Is_150MA_Reversal_Radar")]
                 buys = [f"{k} ({v['TCT_Short_Sig']} @ ${v['Price']:.2f} -> Tgt ${v['Target_Price']:.2f})" for k, v in current_data.items() if v["TCT_Priority"] == 0]
                 tct_boxes = [f"{k} (BOS ${v['BOS_Level']:.2f})" for k, v in current_data.items() if v["TCT_Valid_Range"] and v["TCT_Priority"] != 0]
                 sells = [f"{k} (${v['Price']:.2f})" for k, v in current_data.items() if v["TCT_Priority"] == 4]
                 summary_msg = (
-                    f"🟢 BUY / SWING TRIGGERS ({len(buys)}): {', '.join(buys[:6]) if buys else 'None'}\n"
+                    f"📈 STAGE 2 HIGHER LOW 低點 ({len(st2_hl)}): {', '.join(st2_hl[:6]) if st2_hl else 'None'}\n"
+                    f"🔔 150-MA REVERSAL RADAR ({len(rev_150)}): {', '.join(rev_150[:6]) if rev_150 else 'None'}\n"
+                    f"🟢 ALL BUY / SWING TRIGGERS ({len(buys)}): {', '.join(buys[:6]) if buys else 'None'}\n"
                     f"📐 In TCT Bottom Box ({len(tct_boxes)}): {', '.join(tct_boxes[:6]) if tct_boxes else 'None'}\n"
-                    f"🔴 Below 50 EMA / Avoid ({len(sells)}): {', '.join(sells[:8]) if sells else 'None'}"
+                    f"🔴 Below 150/50 MA Avoid ({len(sells)}): {', '.join(sells[:8]) if sells else 'None'}"
                 )
                 ok, status_msg = send_ntfy_alert(summary_msg, "Daily Portfolio Briefing")
                 st.success(f"✅ {status_msg}") if ok else st.error(f"❌ {status_msg}")
