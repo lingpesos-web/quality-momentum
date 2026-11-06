@@ -726,6 +726,8 @@ def fetch_batch_market_data(tickers, account_size=100000, refresh_bucket=0):
 
             df["EMA20"] = df["Close"].ewm(span=20, adjust=False).mean()
             df["EMA50"] = df["Close"].ewm(span=50, adjust=False).mean()
+            df["EMA150"] = df["Close"].ewm(span=150, adjust=False).mean()
+            df["SMA150"] = df["Close"].rolling(150, min_periods=1).mean()
             df["EMA200"] = df["Close"].ewm(span=200, adjust=False).mean()
             df["High20"] = df["High"].rolling(20).max()
             df["High52"] = df["High"].rolling(252, min_periods=25).max()
@@ -755,6 +757,8 @@ def fetch_batch_market_data(tickers, account_size=100000, refresh_bucket=0):
             high20_prev = float(df["High20"].iloc[-2]) if len(df) >= 22 else close
             ema20_val = float(df["EMA20"].iloc[-1])
             ema50_val = float(df["EMA50"].iloc[-1])
+            ema150_val = float(df["EMA150"].iloc[-1])
+            sma150_val = float(df["SMA150"].iloc[-1])
             pullback_ema = (abs(close - ema20_val) / ema20_val <= 0.025) or (abs(close - ema50_val) / ema50_val <= 0.025)
             above_ema50 = close > ema50_val
             above_ema200 = close > float(df["EMA200"].iloc[-1]) if len(df) >= 200 else True
@@ -779,7 +783,7 @@ def fetch_batch_market_data(tickers, account_size=100000, refresh_bucket=0):
             record = {
                 "Ticker": t, "Price": close, "Change": change, "Change_Pct": change_pct,
                 "Day_High": day_high, "Day_Low": day_low, "RSI": rsi, "RVOL": rvol,
-                "EMA20_Val": ema20_val, "EMA50_Val": ema50_val,
+                "EMA20_Val": ema20_val, "EMA50_Val": ema50_val, "EMA150_Val": ema150_val, "SMA150_Val": sma150_val,
                 "MACD_Above_Zero": macd_above_zero, "MACD_Cross": macd_cross,
                 "Above_EMA50": above_ema50, "Above_EMA200": above_ema200,
                 "Is_Breakout": is_breakout, "Pullback_EMA50": pullback_ema,
@@ -801,14 +805,17 @@ def fetch_batch_market_data(tickers, account_size=100000, refresh_bucket=0):
     return results
 
 @st.cache_data(ttl=180)
-def fetch_single_ticker_data(sym, account_size=100000):
+def fetch_single_ticker_data(sym, account_size=100000, period="5y", interval="1d"):
     res = fetch_batch_market_data([sym], account_size=account_size)
-    if sym in res:
-        return res[sym]
+    base_rec = res.get(sym) if sym in res else None
+    if period == "1y" and interval == "1d" and base_rec is not None and "EMA150" in base_rec["History"].columns:
+        return base_rec
     try:
         t = yf.Ticker(sym)
-        df = t.history(period="1y", interval="1d")
-        if df.empty or len(df) < 20:
+        df = t.history(period=period, interval=interval)
+        if (df is None or df.empty or len(df) < 20) and base_rec is not None:
+            return base_rec
+        if df is None or df.empty or len(df) < 10:
             return None
         try:
             df_1h = t.history(period="1mo", interval="1h")
@@ -818,6 +825,8 @@ def fetch_single_ticker_data(sym, account_size=100000):
         prev_close = float(df["Close"].iloc[-2]) if len(df) >= 2 else close
         df["EMA20"] = df["Close"].ewm(span=20, adjust=False).mean()
         df["EMA50"] = df["Close"].ewm(span=50, adjust=False).mean()
+        df["EMA150"] = df["Close"].ewm(span=150, adjust=False).mean()
+        df["SMA150"] = df["Close"].rolling(150, min_periods=1).mean()
         df["EMA200"] = df["Close"].ewm(span=200, adjust=False).mean()
         df["Vol20"] = df["Volume"].fillna(0).rolling(20).mean()
         df["BB_Mid"] = df["Close"].rolling(20).mean()
@@ -829,6 +838,12 @@ def fetch_single_ticker_data(sym, account_size=100000):
         df["MACD"] = df["Close"].ewm(span=12, adjust=False).mean() - df["Close"].ewm(span=26, adjust=False).mean()
         df["MACD_Signal"] = df["MACD"].ewm(span=9, adjust=False).mean()
         df["MACD_Hist"] = df["MACD"] - df["MACD_Signal"]
+        if base_rec is not None:
+            rec = dict(base_rec)
+            rec["History"] = df
+            rec["EMA150_Val"] = float(df["EMA150"].iloc[-1])
+            rec["SMA150_Val"] = float(df["SMA150"].iloc[-1])
+            return rec
         pb_info = analyze_six_playbooks(df, account_size=account_size, df_1h=df_1h)
         rec = {
             "Ticker": sym, "Price": close, "Change": close - prev_close,
@@ -836,13 +851,14 @@ def fetch_single_ticker_data(sym, account_size=100000):
             "Day_High": float(df["High"].iloc[-1]), "Day_Low": float(df["Low"].iloc[-1]),
             "RSI": float(df["RSI"].iloc[-1]), "RVOL": 1.0,
             "EMA20_Val": float(df["EMA20"].iloc[-1]), "EMA50_Val": float(df["EMA50"].iloc[-1]),
+            "EMA150_Val": float(df["EMA150"].iloc[-1]), "SMA150_Val": float(df["SMA150"].iloc[-1]),
             "State": "Active Trend", "Badge": "badge-trend", "Reason": pb_info["TCT_Explain"],
             "Score": 80, "History": df
         }
         rec.update(pb_info)
         return rec
     except Exception:
-        return None
+        return base_rec
 
 @st.cache_data(ttl=86400)
 def fetch_ticker_fundamentals(ticker_symbol):
@@ -872,6 +888,46 @@ def render_sparkline(prices, is_positive):
     fig = go.Figure(go.Scatter(y=prices, mode='lines', line=dict(color="#15803d" if is_positive else "#b91c1c", width=1.8)))
     fig.update_layout(height=45, width=120, margin=dict(l=0, r=0, t=0, b=0), xaxis=dict(visible=False), yaxis=dict(visible=False), paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
     return fig
+
+def render_watchlist_reorder_panel(folder_name, key_prefix="wl"):
+    st.markdown('<div style="background:#ffffff; border:1px solid #dcd6cb; border-radius:8px; padding:12px 16px; margin-bottom:12px;">', unsafe_allow_html=True)
+    c_top1, c_top2, c_top3 = st.columns([2.2, 2.2, 1.6])
+    with c_top1:
+        st.markdown(f"**✏️ Editing Watchlist: `{folder_name}`**")
+        st.caption("Tap ⏫ (Top), ⬆️ (Up), ⬇️ (Down), or 🗑️ (Delete) to arrange your exact order.")
+    with c_top2:
+        new_list_name = st.text_input("Create New Watchlist Folder", placeholder="e.g. AI & Semis", key=f"{key_prefix}_new_folder_in", label_visibility="collapsed")
+        if st.button("➕ Create New Watchlist", key=f"{key_prefix}_btn_new_folder") and new_list_name.strip():
+            clean_name = new_list_name.strip()
+            if clean_name not in watchlists:
+                watchlists[clean_name] = []
+                ok, msg = sync_file_to_github(watchlists, DATA_FILE)
+                st.toast(msg)
+                st.rerun()
+    with c_top3:
+        if st.button("💾 Save & Sync Order to GitHub", type="primary", use_container_width=True, key=f"{key_prefix}_sync_gh"):
+            ok, msg = sync_file_to_github(watchlists, DATA_FILE)
+            st.success(msg) if ok else st.warning(msg)
+
+    syms = watchlists.get(folder_name, [])
+    if not syms:
+        st.info("This watchlist is currently empty. Add a stock symbol above!")
+    else:
+        e_col1, e_col2 = st.columns(2)
+        half = (len(syms) + 1) // 2
+        for i, s in enumerate(syms):
+            with (e_col1 if i < half else e_col2):
+                r1, r2, r3, r4, r5 = st.columns([2.4, 1, 1, 1, 1])
+                r1.markdown(f"**{i+1}. {s}**")
+                if r2.button("⏫", key=f"{key_prefix}_top_{folder_name}_{s}_{i}", disabled=(i == 0)):
+                    syms.pop(i); syms.insert(0, s); save_json(DATA_FILE, watchlists); st.rerun()
+                if r3.button("⬆️", key=f"{key_prefix}_up_{folder_name}_{s}_{i}", disabled=(i == 0)):
+                    syms[i - 1], syms[i] = syms[i], syms[i - 1]; save_json(DATA_FILE, watchlists); st.rerun()
+                if r4.button("⬇️", key=f"{key_prefix}_dn_{folder_name}_{s}_{i}", disabled=(i == len(syms) - 1)):
+                    syms[i + 1], syms[i] = syms[i], syms[i + 1]; save_json(DATA_FILE, watchlists); st.rerun()
+                if r5.button("🗑️", key=f"{key_prefix}_del_{folder_name}_{s}_{i}"):
+                    syms.pop(i); sync_file_to_github(watchlists, DATA_FILE); st.rerun()
+    st.markdown('</div>', unsafe_allow_html=True)
 
 MACRO_SYMBOLS = {
     "S&P 500": "^GSPC", "Dow Jones": "^DJI", "Nasdaq": "^IXIC", "VIX": "^VIX",
@@ -942,32 +998,54 @@ if st.session_state.inspect_symbol is not None:
     with col_title:
         st.markdown(f"<h1>{sym} · 6-Playbook Technical & Fundamental Dossier</h1>", unsafe_allow_html=True)
 
-    d = fetch_single_ticker_data(sym, account_size=settings["account_size"])
+    c_ctrl, c_plot = st.columns([1.15, 3.85])
+    with c_ctrl:
+        st.markdown("### Chart Timeframe")
+        chart_period = st.selectbox(
+            "History Interval",
+            ["6mo", "1y", "2y", "3y", "5y", "10y", "max"],
+            index=4,
+            format_func=lambda x: {
+                "6mo": "6 Months",
+                "1y": "1 Year",
+                "2y": "2 Years",
+                "3y": "3 Years",
+                "5y": "5 Years (Default)",
+                "10y": "10 Years",
+                "max": "All-Time (Max)"
+            }[x]
+        )
+        chart_bar_interval = st.radio(
+            "Candle Bar Size",
+            ["1d", "1wk"],
+            index=0,
+            format_func=lambda x: "Daily Bars (1D)" if x == "1d" else "Weekly Bars (1W)",
+            horizontal=True
+        )
+        st.markdown("### Chart Overlays")
+        show_tct_lines = st.checkbox("Target / Buy / Stop Lines", value=True)
+        show_ema20 = st.checkbox("EMA 20 (Gold)", value=True)
+        show_ema50 = st.checkbox("EMA 50 (Green)", value=True)
+        show_ma150 = st.checkbox("150 Moving Average (Teal)", value=True)
+        ma150_type = st.radio("150 MA Mode", ["SMA 150", "EMA 150"], index=0, horizontal=True, label_visibility="collapsed")
+        show_ema200 = st.checkbox("EMA 200 (Purple)", value=False)
+        show_bb = st.checkbox("Bollinger Bands (20, 2)", value=False)
+
+    d = fetch_single_ticker_data(sym, account_size=settings["account_size"], period=chart_period, interval=chart_bar_interval)
     funds = fetch_ticker_fundamentals(sym)
 
     if d is not None:
         df_hist = d["History"]
-        f1, f2, f3, f4, f5, f6 = st.columns(6)
+        if "EMA150" not in df_hist.columns:
+            df_hist["EMA150"] = df_hist["Close"].ewm(span=150, adjust=False).mean()
+        if "SMA150" not in df_hist.columns:
+            df_hist["SMA150"] = df_hist["Close"].rolling(150, min_periods=1).mean()
+
         raw_mcap = funds.get("Market Cap")
         mcap_text = f"${raw_mcap/1e9:.1f}B" if isinstance(raw_mcap, (int, float)) and raw_mcap > 0 else "N/A"
+        ma150_val = float(df_hist["SMA150"].iloc[-1]) if ma150_type == "SMA 150" else float(df_hist["EMA150"].iloc[-1])
 
-        f1.metric("Price", f"${d['Price']:,.2f}", f"{'+' if d['Change']>=0 else ''}{d['Change_Pct']:.2f}%")
-        f2.metric("Action Signal", d["TCT_Action"])
-        f3.metric("Buy Trigger (BOS)", f"${d['BOS_Level']:,.2f}")
-        f4.metric("Take Profit Target", f"${d['Target_Price']:,.2f}", f"+{d['Target_Pct']:.1f}%")
-        f5.metric("Safety Stop-Loss", f"${d['Stop_Price']:,.2f}", f"{d['Stop_Pct']:.1f}%", delta_color="inverse")
-        f6.metric("0.5% Risk Size", f"{d['Shares_05Pct']} shs", f"{d['R_Multiple']:.1f}R Reward/Risk")
-
-        st.markdown("---")
-        c_ctrl, c_plot = st.columns([1.15, 3.85])
         with c_ctrl:
-            st.markdown("### Chart Overlays")
-            show_tct_lines = st.checkbox("Target / Buy / Stop Lines", value=True)
-            show_ema20 = st.checkbox("EMA 20 (Gold)", value=True)
-            show_ema50 = st.checkbox("EMA 50 (Green)", value=True)
-            show_ema200 = st.checkbox("EMA 200 (Purple)", value=False)
-            show_bb = st.checkbox("Bollinger Bands (20, 2)", value=False)
-
             st.markdown("---")
             st.markdown("### Action Trade Ticket")
             st.markdown(f"**Playbook:** `{d['TCT_Model']}`")
@@ -977,18 +1055,30 @@ if st.session_state.inspect_symbol is not None:
             st.markdown(f"**Stop-Loss:** `${d['Stop_Price']:,.2f}` ({d['Stop_Pct']:.1f}%)")
             st.markdown(f"**Reward/Risk:** `{d['R_Multiple']:.2f}R` ({'Pass ≥2R' if d['TCT_2R_Pass'] else 'Below 2R'})")
             st.markdown(f"**Suggested Shares:** `{d['Shares_05Pct']} shares` (${d['Pos_Value']:,.0f})")
+            st.markdown(f"**{ma150_type}:** `${ma150_val:,.2f}`")
             st.markdown(f"**RSI(14) / RSI(2):** `{d['RSI']:.1f}` / `{d['RSI2']:.0f}`")
             st.markdown(f"*{d['TCT_Explain']}*")
             st.markdown("---")
             st.markdown(f"**Market Cap:** `{mcap_text}` | **P/E:** `{funds.get('Trailing P/E', 'N/A')}`")
 
         with c_plot:
-            fig = make_subplots(rows=3, cols=1, shared_xaxes=True, vertical_spacing=0.03, row_heights=[0.62, 0.19, 0.19])
+            f1, f2, f3, f4, f5, f6 = st.columns(6)
+            f1.metric("Price", f"${d['Price']:,.2f}", f"{'+' if d['Change']>=0 else ''}{d['Change_Pct']:.2f}%")
+            f2.metric("Action Signal", d["TCT_Action"])
+            f3.metric("Buy Trigger (BOS)", f"${d['BOS_Level']:,.2f}")
+            f4.metric("Take Profit Target", f"${d['Target_Price']:,.2f}", f"+{d['Target_Pct']:.1f}%")
+            f5.metric("Safety Stop-Loss", f"${d['Stop_Price']:,.2f}", f"{d['Stop_Pct']:.1f}%", delta_color="inverse")
+            f6.metric("0.5% Risk Size", f"{d['Shares_05Pct']} shs", f"{d['R_Multiple']:.1f}R Reward/Risk")
+
+            fig = make_subplots(rows=3, cols=1, shared_xaxes=True, vertical_spacing=0.03, row_heights=[0.64, 0.18, 0.18])
             fig.add_trace(go.Candlestick(x=df_hist.index, open=df_hist['Open'], high=df_hist['High'], low=df_hist['Low'], close=df_hist['Close'], name="Candles"), row=1, col=1)
             if show_ema20:
                 fig.add_trace(go.Scatter(x=df_hist.index, y=df_hist['EMA20'], line=dict(color="#d4af37", width=1.5), name="EMA 20"), row=1, col=1)
             if show_ema50:
                 fig.add_trace(go.Scatter(x=df_hist.index, y=df_hist['EMA50'], line=dict(color="#15803d", width=1.5), name="EMA 50"), row=1, col=1)
+            if show_ma150:
+                col_150 = "SMA150" if ma150_type == "SMA 150" else "EMA150"
+                fig.add_trace(go.Scatter(x=df_hist.index, y=df_hist[col_150], line=dict(color="#0284c7", width=2.0), name=ma150_type), row=1, col=1)
             if show_ema200:
                 fig.add_trace(go.Scatter(x=df_hist.index, y=df_hist['EMA200'], line=dict(color="#7c3aed", width=1.5), name="EMA 200"), row=1, col=1)
             if show_bb:
@@ -1004,7 +1094,25 @@ if st.session_state.inspect_symbol is not None:
             fig.add_trace(go.Scatter(x=df_hist.index, y=df_hist['MACD'], line=dict(color="#2563eb", width=1.2), name="MACD"), row=3, col=1)
             fig.add_trace(go.Scatter(x=df_hist.index, y=df_hist['MACD_Signal'], line=dict(color="#ea580c", width=1.2), name="Signal"), row=3, col=1)
             fig.add_trace(go.Bar(x=df_hist.index, y=df_hist['MACD_Hist'], marker_color="#cbd5e1", name="Histogram"), row=3, col=1)
-            fig.update_layout(height=650, margin=dict(l=0, r=0, t=10, b=0), paper_bgcolor="white", plot_bgcolor="white", xaxis_rangeslider_visible=False)
+            fig.update_xaxes(
+                rangeselector=dict(
+                    buttons=list([
+                        dict(count=3, label="3M", step="month", stepmode="backward"),
+                        dict(count=6, label="6M", step="month", stepmode="backward"),
+                        dict(count=1, label="YTD", step="year", stepmode="todate"),
+                        dict(count=1, label="1Y", step="year", stepmode="backward"),
+                        dict(count=2, label="2Y", step="year", stepmode="backward"),
+                        dict(count=3, label="3Y", step="year", stepmode="backward"),
+                        dict(count=5, label="5Y", step="year", stepmode="backward"),
+                        dict(step="all", label="MAX")
+                    ]),
+                    bgcolor="#f4efe6",
+                    activecolor="#c5a059",
+                    font=dict(size=11)
+                ),
+                row=1, col=1
+            )
+            fig.update_layout(height=680, margin=dict(l=0, r=0, t=30, b=0), paper_bgcolor="white", plot_bgcolor="white", xaxis_rangeslider_visible=False)
             st.plotly_chart(fig, use_container_width=True)
 
         st.markdown("### Verified Recent Headlines (Last 72 Hours)")
