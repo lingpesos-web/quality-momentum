@@ -2065,18 +2065,14 @@ else:
 
                 chg_clr = "#15803d" if d["Change"] >= 0 else "#b91c1c"
                 with (left_c if idx % 2 == 0 else right_c):
-                    st.markdown(
-                        f'<div class="stock-card">'
-                        f'<div style="display: flex; justify-content: space-between; align-items: flex-start;">'
-                        f'<div><a href="?inspect={d["Ticker"]}" target="_self" class="ticker-link">📊 {d["Ticker"]}</a>'
-                        f'<span class="badge {d["TCT_Badge"]}" style="margin-left: 8px;">{d["TCT_Action"]}</span>'
-                        f'{rs_html}{earn_html}'
-                        f'<div style="font-size: 1.35rem; font-weight: 700; margin-top: 6px;">'
-                        f'${d["Price"]:,.2f} <span style="font-size: 0.9rem; color: {chg_clr}; font-weight: 700;">'
-                        f'{arr_w}${abs(d["Change"]):.2f} ({d["Change_Pct"]:+.2f}%)</span></div></div>'
-                        f'<div style="text-align: right;">'
-                        f'<div style="font-size: 1.6rem; font-weight: 700; color: #c5a059; font-family: Newsreader, serif;">'
-                        f'{d["Score"]}</div>'
-                        f'<div style="font-size: 0.7rem; color: #71717a; text-transform: uppercase;">Score</div>'
-                        f'</div></div>'
-                      
+                    st.markdown("---")
+            if current_data:
+                df_export = pd.DataFrame([{
+                    "Timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "Ticker": sym_name,
+                    "Price": d["Price"], "Change": d["Change"], "Change_Pct": d["Change_Pct"],
+                    "Day_High": d["Day_High"], "Day_Low": d["Day_Low"], "Playbook": d["TCT_Model"],
+                    "Action_Signal": d["TCT_Action"], "Buy_Trigger": d["BOS_Level"],
+                    "Take_Profit_Target": d["Target_Price"], "Stop_Loss": d["Stop_Price"],
+                    "Reward_Risk_R": round(d["R_Multiple"], 2), "Suggested_Shares_05Pct": d["Shares_05Pct"]
+                } for sym_name, d in current_data.items()])
+                st.download_button("📥 Download Full 6-Playbook Plan CSV", df_export.to_csv(index=False).encode("utf-8"), f"tct_swing_plan_{datetime.now().strftime('%Y%m%d_%H%M')}.csv", "text/csv", type="primary")
