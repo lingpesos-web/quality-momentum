@@ -259,20 +259,65 @@ for k_s, v_s in [("account_size", 100000), ("news_limit", 60), ("max_news_age_ho
         settings[k_s] = v_s
 
 GICS_SECTORS = {
-    "AI, Semiconductors & Hardware": ["NVDA", "AVGO", "AMD", "MU", "TSM", "ASML", "AMAT", "LRCX", "KLAC", "MRVL", "ARM", "QCOM", "TXN", "ADI", "ON", "MPWR", "NXPI", "MCHP", "TER", "ENTG", "CRDO", "VRT", "COHR", "LITE", "CIEN", "FN", "ANET", "SMCI", "DELL", "HPE", "SNDK", "STX", "WDC", "NTAP", "PSTG", "GLW", "CLS", "JBL", "FLEX", "APH"],
-    "Software, Cloud & Cybersecurity": ["MSFT", "ORCL", "CRM", "ADBE", "NOW", "INTU", "PLTR", "APP", "SNOW", "PANW", "CRWD", "FTNT", "ZS", "NET", "DDOG", "MDB", "TEAM", "WDAY", "HUBS", "TTD", "IOT", "DUOL", "MNDY", "PATH", "CFLT", "GTLB", "S", "OKTA", "CYBR", "DOCU"],
-    "Quantum, Space & Next-Gen Tech": ["IONQ", "QUBT", "RGTI", "QBTS", "ARQQ", "RKLB", "ASTS", "LUNR", "PL", "SPIR", "JOBY", "ACHR", "SERV", "SOUN", "BBAI", "SYM", "UPST", "AFRM", "RDDT", "ALAB"],
-    "Crypto, Fintech & Financials": ["COIN", "MSTR", "HOOD", "SOFI", "PYPL", "MARA", "RIOT", "CLSK", "IREN", "CORZ", "HUT", "WULF", "CIFR", "JPM", "GS", "MS", "BLK", "BX", "KKR", "APO", "ARES", "V", "MA", "AXP", "BAC", "WFC", "C", "SCHW"],
-    "Communication & Internet Leaders": ["GOOGL", "META", "NFLX", "AMZN", "AAPL", "TSLA", "SPOT", "UBER", "DASH", "ABNB", "BKNG", "EXPE", "TMUS", "DIS", "CMCSA", "RBLX", "U", "EA", "TTWO", "PINS"],
-    "Energy, Nuclear & Precious Metals": ["CEG", "VST", "NRG", "TLN", "OKLO", "SMR", "CCJ", "UEC", "NXE", "DNN", "NEE", "SO", "DUK", "GEV", "XOM", "CVX", "COP", "EOG", "SLB", "HAL", "NEM", "AEM", "WPM", "FNV", "PAAS", "AG", "CDE", "HL", "FCX", "SLV", "GLD"],
-    "Industrials, Defense & Infrastructure": ["GE", "CAT", "ETN", "PWR", "EME", "FIX", "URI", "PH", "TT", "CARR", "RTX", "LMT", "NOC", "GD", "LHX", "HII", "AXON", "TDG", "HEI", "HWM", "UNP", "CSX", "FDX", "UPS", "DE", "HON", "WM", "RSG"],
-    "Health Care & Biotech Innovators": ["LLY", "NVO", "VRTX", "REGN", "AMGN", "GILD", "ISRG", "SYK", "BSX", "MDT", "ABT", "TMO", "DHR", "UNH", "ELV", "CI", "HCA", "IDXX", "DXCM", "PODD", "ADPT", "TEM", "EXAS", "NTRA", "GH", "TWST", "CRSP", "NTLA", "BEAM", "VKTX"],
-    "Consumer & Retail Powerhouses": ["WMT", "COST", "TGT", "HD", "LOW", "TJX", "ROST", "NKE", "ONON", "DECK", "LULU", "SBUX", "CMG", "CAVA", "SHAK", "MCD", "YUM", "DPZ", "PG", "KO", "PEP", "PM"],
-    "Indexes, Precious Metals & Crypto": ["^GSPC", "^DJI", "^IXIC", "GC=F", "SI=F", "HG=F", "PL=F", "GLD", "SLV", "BTC-USD", "ETH-USD", "SOL-USD", "XRP-USD", "DX-Y.NYB", "JPY=X", "EURUSD=X"]
+    "AI, Semiconductors & Hardware": [
+        "NVDA", "AVGO", "AMD", "MU", "TSM", "ASML", "AMAT", "LRCX", "KLAC", "MRVL",
+        "ARM", "QCOM", "TXN", "ADI", "ON", "MPWR", "NXPI", "MCHP", "TER", "ENTG",
+        "CRDO", "VRT", "COHR", "LITE", "CIEN", "FN", "ANET", "SMCI", "DELL", "HPE",
+        "SNDK", "STX", "WDC", "NTAP", "PSTG", "GLW", "CLS", "JBL", "FLEX", "APH"
+    ],
+    "Software, Cloud & Cybersecurity": [
+        "MSFT", "ORCL", "CRM", "ADBE", "NOW", "INTU", "PLTR", "APP", "SNOW", "PANW",
+        "CRWD", "FTNT", "ZS", "NET", "DDOG", "MDB", "TEAM", "WDAY", "HUBS", "TTD",
+        "IOT", "DUOL", "MNDY", "PATH", "CFLT", "GTLB", "S", "OKTA", "CYBR", "DOCU"
+    ],
+    "Quantum, Space & Next-Gen Tech": [
+        "IONQ", "QUBT", "RGTI", "QBTS", "ARQQ", "RKLB", "ASTS", "LUNR", "PL", "SPIR",
+        "JOBY", "ACHR", "SERV", "SOUN", "BBAI", "SYM", "UPST", "AFRM", "RDDT", "ALAB"
+    ],
+    "Crypto, Fintech & Financials": [
+        "COIN", "MSTR", "HOOD", "SOFI", "PYPL", "MARA", "RIOT", "CLSK", "IREN", "CORZ",
+        "HUT", "WULF", "CIFR", "JPM", "GS", "MS", "BLK", "BX", "KKR", "APO",
+        "ARES", "V", "MA", "AXP", "BAC", "WFC", "C", "SCHW"
+    ],
+    "Communication & Internet Leaders": [
+        "GOOGL", "META", "NFLX", "AMZN", "AAPL", "TSLA", "SPOT", "UBER", "DASH", "ABNB",
+        "BKNG", "EXPE", "TMUS", "DIS", "CMCSA", "RBLX", "U", "EA", "TTWO", "PINS"
+    ],
+    "Energy, Nuclear & Precious Metals": [
+        "CEG", "VST", "NRG", "TLN", "OKLO", "SMR", "CCJ", "UEC", "NXE", "DNN",
+        "NEE", "SO", "DUK", "GEV", "XOM", "CVX", "COP", "EOG", "SLB", "HAL",
+        "NEM", "AEM", "WPM", "FNV", "PAAS", "AG", "CDE", "HL", "FCX", "SLV", "GLD"
+    ],
+    "Industrials, Defense & Infrastructure": [
+        "GE", "CAT", "ETN", "PWR", "EME", "FIX", "URI", "PH", "TT", "CARR",
+        "RTX", "LMT", "NOC", "GD", "LHX", "HII", "AXON", "TDG", "HEI", "HWM",
+        "UNP", "CSX", "FDX", "UPS", "DE", "HON", "WM", "RSG"
+    ],
+    "Health Care & Biotech Innovators": [
+        "LLY", "NVO", "VRTX", "REGN", "AMGN", "GILD", "ISRG", "SYK", "BSX", "MDT",
+        "ABT", "TMO", "DHR", "UNH", "ELV", "CI", "HCA", "IDXX", "DXCM", "PODD",
+        "ADPT", "TEM", "EXAS", "NTRA", "GH", "TWST", "CRSP", "NTLA", "BEAM", "VKTX"
+    ],
+    "Consumer & Retail Powerhouses": [
+        "WMT", "COST", "TGT", "HD", "LOW", "TJX", "ROST", "NKE", "ONON", "DECK",
+        "LULU", "SBUX", "CMG", "CAVA", "SHAK", "MCD", "YUM", "DPZ", "PG", "KO", "PEP", "PM"
+    ],
+    "Indexes, Precious Metals & Crypto": [
+        "^GSPC", "^DJI", "^IXIC", "GC=F", "SI=F", "HG=F", "PL=F", "GLD", "SLV",
+        "BTC-USD", "ETH-USD", "SOL-USD", "XRP-USD", "DX-Y.NYB", "JPY=X", "EURUSD=X"
+    ]
 }
 
-BLOCKED_NEWS_SOURCES = {"marketbeat", "zacks", "defense world", "etf daily news", "ticker report", "american banking news", "simply wall st", "stocknews.com", "wall street zen", "holdings channel", "transcript daily", "modern readers", "watch list news", "stocktwits", "stockwits"}
-STALE_HEADLINE_PATTERNS = ["if you invested", "years ago", "last year", "months ago", "why shares plunged in ", "heres how much "]
+BLOCKED_NEWS_SOURCES = {
+    "marketbeat", "zacks", "defense world", "etf daily news", "ticker report",
+    "american banking news", "simply wall st", "stocknews.com", "wall street zen",
+    "holdings channel", "transcript daily", "modern readers", "watch list news",
+    "stocktwits", "stockwits"
+}
+STALE_HEADLINE_PATTERNS = [
+    "if you invested", "years ago", "last year",
+    "months ago", "why shares plunged in ", "heres how much "
+]
 
 def _fetch_rss_raw(query, max_per_query=18, ticker_tag=None, max_age_hours=72):
     q_with_time = query if "when:" in query else f"{query} when:3d"
@@ -314,42 +359,61 @@ def _fetch_rss_raw(query, max_per_query=18, ticker_tag=None, max_age_hours=72):
         pass
     return articles
 
+def _safe_parallel_map(fn, items, max_workers=2):
+    if not items:
+        return []
+    try:
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            return list(executor.map(fn, items))
+    except Exception:
+        return [fn(x) for x in items]
+
 @st.cache_data(ttl=600)
 def fetch_google_news_rss(query, max_items=60, max_age_hours=72):
     queries = [f"{query} when:3d", "S&P 500 Nasdaq stock market today when:3d", "Wall Street stocks earnings Federal Reserve when:3d", "US tech stocks semiconductors market news when:3d"]
     pool, seen_links, seen_titles = [], set(), set()
-    with ThreadPoolExecutor(max_workers=4) as executor:
-        for fut in [executor.submit(_fetch_rss_raw, q, 25, "MARKET", max_age_hours) for q in queries]:
-            for item in fut.result():
-                norm_t = item["title"][:45].lower()
-                if item["link"] not in seen_links and norm_t not in seen_titles:
-                    seen_links.add(item["link"]); seen_titles.add(norm_t); pool.append(item)
+    results = _safe_parallel_map(lambda q: _fetch_rss_raw(q, 25, "MARKET", max_age_hours), queries, max_workers=2)
+    for batch in results:
+        for item in batch:
+            norm_t = item["title"][:45].lower()
+            if item["link"] not in seen_links and norm_t not in seen_titles:
+                seen_links.add(item["link"]); seen_titles.add(norm_t); pool.append(item)
     return sorted(pool, key=lambda x: x["timestamp"], reverse=True)[:max_items]
 
 @st.cache_data(ttl=600)
 def fetch_watchlist_news_pool(tickers, max_items=60, max_age_hours=72):
     if not tickers:
         return []
+    unique_syms = [str(s).strip().upper() for s in dict.fromkeys(tickers) if str(s).strip()]
+    chunks = [unique_syms[i:i + 6] for i in range(0, len(unique_syms), 6)]
+    def _fetch_chunk(chunk):
+        or_query = " OR ".join([f'"{s}"' for s in chunk])
+        raw_items = _fetch_rss_raw(f"({or_query}) stock when:3d", 16, chunk[0], max_age_hours)
+        for it in raw_items:
+            title_up = it["title"].upper()
+            matched = next((s for s in chunk if s in title_up), "WATCHLIST")
+            it["ticker"] = matched
+        return raw_items
+
     pool, seen_links, seen_titles = [], set(), set()
-    with ThreadPoolExecutor(max_workers=10) as executor:
-        futures = [executor.submit(_fetch_rss_raw, f'"{sym}" stock when:3d', 4, sym, max_age_hours) for sym in list(dict.fromkeys(tickers))]
-        for fut in futures:
-            for item in fut.result():
-                norm_t = item["title"][:45].lower()
-                if item["link"] not in seen_links and norm_t not in seen_titles:
-                    seen_links.add(item["link"]); seen_titles.add(norm_t); pool.append(item)
+    results = _safe_parallel_map(_fetch_chunk, chunks, max_workers=2)
+    for batch in results:
+        for item in batch:
+            norm_t = item["title"][:45].lower()
+            if item["link"] not in seen_links and norm_t not in seen_titles:
+                seen_links.add(item["link"]); seen_titles.add(norm_t); pool.append(item)
     return sorted(pool, key=lambda x: x["timestamp"], reverse=True)[:max_items]
 
 @st.cache_data(ttl=600)
 def fetch_metals_crypto_fx_news(max_items=50, max_age_hours=72):
     queries = [("gold silver copper prices commodities market when:3d", "METALS"), ("Bitcoin Ethereum Solana XRP crypto market when:3d", "CRYPTO"), ("US Dollar Index DXY USD JPY EUR USD forex when:3d", "FX/USD")]
     pool, seen_links, seen_titles = [], set(), set()
-    with ThreadPoolExecutor(max_workers=3) as executor:
-        for fut in [executor.submit(_fetch_rss_raw, q, 22, tag, max_age_hours) for q, tag in queries]:
-            for item in fut.result():
-                norm_t = item["title"][:45].lower()
-                if item["link"] not in seen_links and norm_t not in seen_titles:
-                    seen_links.add(item["link"]); seen_titles.add(norm_t); pool.append(item)
+    results = _safe_parallel_map(lambda qt: _fetch_rss_raw(qt[0], 22, qt[1], max_age_hours), queries, max_workers=2)
+    for batch in results:
+        for item in batch:
+            norm_t = item["title"][:45].lower()
+            if item["link"] not in seen_links and norm_t not in seen_titles:
+                seen_links.add(item["link"]); seen_titles.add(norm_t); pool.append(item)
     return sorted(pool, key=lambda x: x["timestamp"], reverse=True)[:max_items]
 
 @st.cache_data(ttl=14400)
@@ -391,10 +455,9 @@ def fetch_upcoming_earnings_map(tickers):
             pass
         return sym, None
 
-    with ThreadPoolExecutor(max_workers=8) as ex:
-        for sym, res in ex.map(_check_one, list(dict.fromkeys(tickers))):
-            if res is not None:
-                out[sym] = res
+    for sym, res in _safe_parallel_map(_check_one, list(dict.fromkeys(tickers)), max_workers=2):
+        if res is not None:
+            out[sym] = res
     return out
 
 def analyze_six_playbooks(df, account_size=100000, spy_ret_63d=0.0, df_1h=None):
@@ -503,7 +566,7 @@ def analyze_six_playbooks(df, account_size=100000, spy_ret_63d=0.0, df_1h=None):
     high_3d_prev = float(np.max(high_arr[-4:-1])) if n >= 5 else curr_close
     low_3d = float(np.min(low_arr[-3:]))
 
-    # --- 掃地僧 / STAN WEINSTEIN 150-DAY MA STRATEGIES ---
+    # --- STAGE 2 & 150-DAY MA STRATEGIES ---
     # 1) 🔔 150-MA Reversal Radar (Just broke back above 150-Day MA -> Early Research Alert)
     lb_rev = min(n, 30)
     bars_below_150 = int(np.sum(close_arr[-lb_rev:-1] < sma150_arr[-lb_rev:-1])) if lb_rev > 3 else 0
@@ -513,7 +576,7 @@ def analyze_six_playbooks(df, account_size=100000, spy_ret_63d=0.0, df_1h=None):
         (bars_below_150 >= 3)
     )
 
-    # 2) 📈 Stage 2 Higher Low (第二階段・回調低點 -> Ideal Pullback Bounce Entry)
+    # 2) 📈 Stage 2 Higher Low (Pullback Bounce Entry)
     recent_pb_low = float(np.min(low_arr[-12:])) if n >= 12 else float(low_arr[-1])
     prior_pb_low = float(np.min(low_arr[-38:-12])) if n >= 38 else sma150
     pulled_back_from_high = (recent_pb_low <= high_20d_curr * 0.982) and (curr_close <= high_20d_curr * 0.994)
@@ -546,7 +609,7 @@ def analyze_six_playbooks(df, account_size=100000, spy_ret_63d=0.0, df_1h=None):
         effective_stop = max(min(tap3_price - (0.5 * atr14_1h_est), entry_ref * 0.98), entry_ref * 0.93)
         target_price = range_high
     elif is_stage2_higher_low:
-        playbook_name = "📈 Playbook 7: Stage 2 Higher Low (低點)"
+        playbook_name = "📈 Playbook 7: Stage 2 Higher Low"
         playbook_cat = "STAGE2_HL"
         bos_level = max(float(high_arr[-2]), curr_close) if curr_close < prev_close else curr_close
         entry_ref = curr_close
@@ -615,8 +678,8 @@ def analyze_six_playbooks(df, account_size=100000, spy_ret_63d=0.0, df_1h=None):
         act, badge, dot, short_s, prio = "BUY NOW (TCT BOS)", "badge-tct-buy", "🟢", "🟢 Buy Now", 0
         expl = f"TCT accumulation breakout above BOS (${bos_level:,.2f}) targeting Range High (${target_price:,.2f})."
     elif is_stage2_higher_low:
-        act, badge, dot, short_s, prio = "STAGE 2 HIGHER LOW (低點 BUY)", "badge-tct-buy", "📈", "📈 Stage2 低點", 0
-        expl = f"掃地僧 Stage 2 Higher Low (低點): Uptrend above rising 150-MA (${sma150:,.2f}), Higher Low at ${recent_pb_low:,.2f} > prior low (${prior_pb_low:,.2f}), bouncing up!"
+        act, badge, dot, short_s, prio = "STAGE 2 HIGHER LOW", "badge-tct-buy", "📈", "📈 Stage 2 HL", 0
+        expl = f"Stage 2 Higher Low: Uptrend above rising 150-MA (${sma150:,.2f}), Higher Low at ${recent_pb_low:,.2f} > prior low (${prior_pb_low:,.2f})."
     elif is_20d_breakout or is_gap_ignition:
         act, badge, dot, short_s, prio = "BUY NOW (BREAKOUT)", "badge-tct-buy", "🟢", "🟢 Buy Now", 0
         expl = f"{playbook_name}: Breakout above ${bos_level:,.2f} on {paced_rvol:.1f}x pace volume."
@@ -625,7 +688,7 @@ def analyze_six_playbooks(df, account_size=100000, spy_ret_63d=0.0, df_1h=None):
         expl = f"{playbook_name}: High-probability swing entry near ${entry_ref:,.2f}, stop ${effective_stop:,.2f}."
     elif is_150ma_reversal_radar:
         act, badge, dot, short_s, prio = "🔔 150-MA REVERSAL (RESEARCH)", "badge-tct-watch", "🔔", "🔔 150MA Radar", 1
-        expl = f"Just crossed back above 150-Day MA (${sma150:,.2f})! Early Stage 2 reversal radar — start researching & watch for the next Higher Low (低點)."
+        expl = f"Reclaimed 150-Day MA (${sma150:,.2f}). Early trend reversal radar — monitor for Stage 2 Higher Low."
     elif is_rsi2_snapback:
         act, badge, dot, short_s, prio = "SWING BUY (OVERSOLD)", "badge-tct-watch", "🪃", "🪃 Oversold", 1
         expl = f"RSI-2 extreme oversold ({rsi2:.0f}) above 200-EMA. Target bounce to ${target_price:,.2f}."
@@ -733,7 +796,7 @@ def check_and_fire_live_ntfy(records):
         if new_buys or new_reversals or new_targets or new_stops:
             lines = []
             if new_buys:
-                lines.append("🟢 INSTANT BUY / STAGE 2 低點: " + ", ".join(new_buys[:6]))
+                lines.append("🟢 INSTANT BUY / STAGE 2 HL: " + ", ".join(new_buys[:6]))
             if new_reversals:
                 lines.append("🔔 150-MA REVERSAL RADAR (RESEARCH): " + ", ".join(new_reversals[:6]))
             if new_targets:
@@ -766,12 +829,12 @@ def fetch_batch_market_data(tickers, account_size=100000, refresh_bucket=0):
         return {}
     download_list = list(dict.fromkeys(clean_tickers + ["^GSPC"]))
     try:
-        data = yf.download(download_list, period="1y", interval="1d", group_by="ticker", progress=False)
+        data = yf.download(download_list, period="1y", interval="1d", group_by="ticker", progress=False, threads=False)
         now_utc = datetime.now(timezone.utc)
         data_intraday = None
         if now_utc.hour in (0, 1):
             try:
-                data_intraday = yf.download(clean_tickers[:45], period="5d", interval="15m", group_by="ticker", progress=False)
+                data_intraday = yf.download(clean_tickers[:45], period="5d", interval="15m", group_by="ticker", progress=False, threads=False)
             except Exception:
                 data_intraday = None
     except Exception:
@@ -1037,7 +1100,7 @@ def fetch_macro_and_regime():
     out = {}
     regime = {"label": "🟢 MARKET REGIME: BULLISH — S&P 500 Holding Trend · Favorable for New Setups", "bg": "#dcfce7", "border": "#86efac", "color": "#14532d"}
     try:
-        df = yf.download(ticks, period="3mo", interval="1d", group_by="ticker", progress=False)
+        df = yf.download(ticks, period="3mo", interval="1d", group_by="ticker", progress=False, threads=False)
         for name, sym in MACRO_SYMBOLS.items():
             sub = _extract_ticker_df(df, sym, len(ticks)).dropna(subset=["Close"])
             if len(sub) >= 2:
@@ -1060,7 +1123,14 @@ def fetch_macro_and_regime():
     return out, regime
 
 st.sidebar.markdown(
-    """<div style="padding: 10px 0 20px 0;"><span style="display: inline-block; width: 9px; height: 9px; background: #22c55e; border-radius: 50%; margin-right: 6px;"></span><span style="font-size: 0.85rem; font-weight: 600; letter-spacing: 0.05em; color: #a1a1aa;">6-PLAYBOOK LIVE ENGINE</span><h2 style="color: #f4efe6 !important; margin: 6px 0 0 0; font-size: 1.4rem;">Ledger</h2><span style="font-size: 0.75rem; color: #c5a059; text-transform: uppercase; letter-spacing: 0.1em; font-weight: 600;">Momentum · Swing · TCT v11.1</span></div>""",
+    '<div style="padding: 10px 0 20px 0;">'
+    '<span style="display: inline-block; width: 9px; height: 9px; background: #22c55e; '
+    'border-radius: 50%; margin-right: 6px;"></span>'
+    '<span style="font-size: 0.85rem; font-weight: 600; letter-spacing: 0.05em; color: #a1a1aa;">'
+    'MULTI-PLAYBOOK LIVE ENGINE</span>'
+    '<h2 style="color: #f4efe6 !important; margin: 6px 0 0 0; font-size: 1.4rem;">Ledger</h2>'
+    '<span style="font-size: 0.75rem; color: #c5a059; text-transform: uppercase; '
+    'letter-spacing: 0.1em; font-weight: 600;">Momentum · Stage 2 · TCT v11.2</span></div>',
     unsafe_allow_html=True
 )
 
@@ -1078,11 +1148,19 @@ if navigation != "⚡ Live Real-Time Quotes" or st.session_state.inspect_symbol 
     macro_data, regime_info = fetch_macro_and_regime()
     if macro_data:
         cards_html = "".join([
-            f'<div class="macro-card"><div class="macro-title">{name}</div><div class="macro-price">{price:,.2f}</div><div class="{"tick-pos" if chg >= 0 else "tick-neg"}">{"▲ +" if chg >= 0 else "▼ "}{chg:.2f} ({"+" if chg >= 0 else ""}{pct:.2f}%)</div></div>'
+            f'<div class="macro-card"><div class="macro-title">{name}</div>'
+            f'<div class="macro-price">{price:,.2f}</div>'
+            f'<div class="{"tick-pos" if chg >= 0 else "tick-neg"}">'
+            f'{"▲ +" if chg >= 0 else "▼ "}{chg:.2f} ({"+" if chg >= 0 else ""}{pct:.2f}%)</div></div>'
             for name, (price, chg, pct) in macro_data.items()
         ])
         st.markdown(f'<div class="macro-container">{cards_html}</div>', unsafe_allow_html=True)
-    st.markdown(f'<div style="background:{regime_info["bg"]}; border:1px solid {regime_info["border"]}; color:{regime_info["color"]}; padding:8px 14px; border-radius:8px; font-size:0.82rem; font-weight:600; margin-bottom:16px;">{regime_info["label"]}</div>', unsafe_allow_html=True)
+    st.markdown(
+        f'<div style="background:{regime_info["bg"]}; border:1px solid {regime_info["border"]}; '
+        f'color:{regime_info["color"]}; padding:8px 14px; border-radius:8px; '
+        f'font-size:0.82rem; font-weight:600; margin-bottom:16px;">{regime_info["label"]}</div>',
+        unsafe_allow_html=True
+    )
 
 if st.session_state.inspect_symbol is not None:
     sym = st.session_state.inspect_symbol
@@ -1226,8 +1304,7 @@ if st.session_state.inspect_symbol is not None:
 else:
     if navigation == "Dashboard":
         st.markdown("<h1>Market Cockpit</h1>", unsafe_allow_html=True)
-        st.markdown("<p style='color: #52525b; margin-top: -12px;'>Tap any stock symbol to open its interactive chart & 6-Playbook Trade Ticket.</p>", unsafe_allow_html=True)
-
+        
         all_monitored = get_all_monitored_tickers()
         stock_records = fetch_batch_market_data(all_monitored, account_size=settings["account_size"])
 
@@ -1248,7 +1325,10 @@ else:
                                 {arr_b}${abs(best_pick['Change']):.2f} ({best_pick['Change_Pct']:+.2f}%)
                             </span>
                             <div style="color: #cbd5e1; font-size: 0.90rem; margin-top: 6px;">
-                                <b>Buy Trigger:</b> ${best_pick['BOS_Level']:,.2f} · <b>Take Profit:</b> ${best_pick['Target_Price']:,.2f} (+{best_pick['Target_Pct']:.1f}%) · <b>Stop-Loss:</b> ${best_pick['Stop_Price']:,.2f} ({best_pick['Stop_Pct']:.1f}%) · <b>Size (0.5% Risk):</b> {best_pick['Shares_05Pct']} shs ({best_pick['R_Multiple']:.1f}R)
+                                <b>Buy Trigger:</b> ${best_pick['BOS_Level']:,.2f} ·
+                                <b>Take Profit:</b> ${best_pick['Target_Price']:,.2f} (+{best_pick['Target_Pct']:.1f}%) ·
+                                <b>Stop-Loss:</b> ${best_pick['Stop_Price']:,.2f} ({best_pick['Stop_Pct']:.1f}%) ·
+                                <b>Size (0.5% Risk):</b> {best_pick['Shares_05Pct']} shs ({best_pick['R_Multiple']:.1f}R)
                             </div>
                         </div>
                         <div style="text-align: right;">
@@ -1263,21 +1343,35 @@ else:
         col_left, col_right = st.columns([2, 1])
         with col_left:
             tab_watch, tab_macro, tab_mcf = st.tabs([f"Watchlist News ({len(all_monitored)} Tickers)", "General Market", "Metals, Crypto & USD"])
+            def _render_news_box(articles, show_ticker=True):
+                items_html = []
+                for a in articles:
+                    t_badge = f'<span class="ticker-news-badge">[{a.get("ticker", "NEWS")}]</span> ' if show_ticker else ''
+                    items_html.append(
+                        f'<div style="background: white; border: 1px solid #e7e2d9; border-radius: 8px; '
+                        f'padding: 12px 16px; margin-bottom: 8px;">'
+                        f'<div style="display: flex; justify-content: space-between; font-size: 0.72rem; color: #71717a;">'
+                        f'<span style="font-weight: 600;">{t_badge}{a["publisher"]}'
+                        f'<span class="age-badge">{a["age"]}</span></span>'
+                        f'<span>{a["date"]}</span></div>'
+                        f'<div style="font-weight: 600; font-size: 0.92rem; margin-top: 4px;">'
+                        f'<a href="{a["link"]}" target="_blank" style="color: #0f291e; text-decoration: none;">'
+                        f'{a["title"]}</a></div></div>'
+                    )
+                st.markdown('<div class="scroll-news-box">' + "".join(items_html) + '</div>', unsafe_allow_html=True)
+
             with tab_watch:
                 wl_news = fetch_watchlist_news_pool(all_monitored, max_items=settings["news_limit"], max_age_hours=settings["max_news_age_hours"])
                 if wl_news:
-                    news_html = '<div class="scroll-news-box">' + "".join([f'<div style="background: white; border: 1px solid #e7e2d9; border-radius: 8px; padding: 12px 16px; margin-bottom: 8px;"><div style="display: flex; justify-content: space-between; font-size: 0.72rem; color: #71717a;"><span style="font-weight: 600;"><span class="ticker-news-badge">[{a.get("ticker", "NEWS")}]</span> {a["publisher"]}<span class="age-badge">{a["age"]}</span></span><span>{a["date"]}</span></div><div style="font-weight: 600; font-size: 0.92rem; margin-top: 4px;"><a href="{a["link"]}" target="_blank" style="color: #0f291e; text-decoration: none;">{a["title"]}</a></div></div>' for a in wl_news]) + '</div>'
-                    st.markdown(news_html, unsafe_allow_html=True)
+                    _render_news_box(wl_news, show_ticker=True)
             with tab_macro:
                 market_news = fetch_google_news_rss("US stock market news", max_items=settings["news_limit"], max_age_hours=settings["max_news_age_hours"])
                 if market_news:
-                    m_html = '<div class="scroll-news-box">' + "".join([f'<div style="background: white; border: 1px solid #e7e2d9; border-radius: 8px; padding: 12px 16px; margin-bottom: 8px;"><div style="display: flex; justify-content: space-between; font-size: 0.72rem; color: #71717a;"><span style="font-weight: 600;">{n["publisher"]}<span class="age-badge">{n["age"]}</span></span><span>{n["date"]}</span></div><div style="font-weight: 600; font-size: 0.92rem; margin-top: 3px;"><a href="{n["link"]}" target="_blank" style="color: #0f291e; text-decoration: none;">{n["title"]}</a></div></div>' for n in market_news]) + '</div>'
-                    st.markdown(m_html, unsafe_allow_html=True)
+                    _render_news_box(market_news, show_ticker=False)
             with tab_mcf:
                 mcf_news = fetch_metals_crypto_fx_news(max_items=settings["news_limit"], max_age_hours=settings["max_news_age_hours"])
                 if mcf_news:
-                    c_html = '<div class="scroll-news-box">' + "".join([f'<div style="background: white; border: 1px solid #e7e2d9; border-radius: 8px; padding: 12px 16px; margin-bottom: 8px;"><div style="display: flex; justify-content: space-between; font-size: 0.72rem; color: #71717a;"><span style="font-weight: 600;"><span class="ticker-news-badge">[{a["ticker"]}]</span> {a["publisher"]}<span class="age-badge">{a["age"]}</span></span><span>{a["date"]}</span></div><div style="font-weight: 600; font-size: 0.92rem; margin-top: 4px;"><a href="{a["link"]}" target="_blank" style="color: #0f291e; text-decoration: none;">{a["title"]}</a></div></div>' for a in mcf_news]) + '</div>'
-                    st.markdown(c_html, unsafe_allow_html=True)
+                    _render_news_box(mcf_news, show_ticker=True)
 
         with col_right:
             st.subheader("Action Signals Snapshot")
@@ -1320,7 +1414,19 @@ else:
         with ctrl2:
             live_board_mode = st.selectbox("Board Mode", ["📊 Custom Signal Board (Large Font)", "⚡ TradingView Streaming (Tick-by-Tick)"], index=0, label_visibility="collapsed")
         with ctrl3:
-            live_sort = st.selectbox("Rank / Sort", ["Rank: My Saved Order", "Rank: 🟢 Action Signal (Buy First)", "Rank: 📈 Day % Change (Gainers)", "Rank: 📉 Day % Change (Losers)", "Rank: 🔥 Relative Strength vs S&P", "Rank: 💯 Composite Score"], index=0, label_visibility="collapsed")
+            live_sort = st.selectbox(
+                "Rank / Sort",
+                [
+                    "Rank: My Saved Order",
+                    "Rank: 🟢 Action Signal (Buy First)",
+                    "Rank: 📈 Day % Change (Gainers)",
+                    "Rank: 📉 Day % Change (Losers)",
+                    "Rank: 🔥 Relative Strength vs S&P",
+                    "Rank: 💯 Composite Score"
+                ],
+                index=0,
+                label_visibility="collapsed"
+            )
         with ctrl4:
             auto_refresh_choice = st.selectbox("Auto-Refresh Timer", ["⏱️ Auto: Off", "⏱️ Auto: 15s", "⏱️ Auto: 30s", "⏱️ Auto: 60s"], index=0, label_visibility="collapsed")
         with ctrl5:
@@ -1377,7 +1483,12 @@ else:
                             syms_ed.pop(i); sync_file_to_github(watchlists, DATA_FILE); st.rerun()
             st.markdown('</div>', unsafe_allow_html=True)
 
-        active_live_syms = get_all_monitored_tickers() if selected_live_folder == "All Watchlists Combined" else ([p["Ticker"] for p in positions] if selected_live_folder == "Active Positions" else list(watchlists.get(selected_live_folder, [])))
+        if selected_live_folder == "All Watchlists Combined":
+            active_live_syms = get_all_monitored_tickers()
+        elif selected_live_folder == "Active Positions":
+            active_live_syms = [p["Ticker"] for p in positions]
+        else:
+            active_live_syms = list(watchlists.get(selected_live_folder, []))
         run_every_sec = {"⏱️ Auto: Off": None, "⏱️ Auto: 15s": 15, "⏱️ Auto: 30s": 30, "⏱️ Auto: 60s": 60}.get(auto_refresh_choice)
 
         def render_live_watchboard_content():
@@ -1524,11 +1635,31 @@ else:
                     wh = max(460, min(820, mid * 38 + 100))
 
                     tc1, tc2 = st.columns(2)
+                    g1_json = json.dumps([{"name": f"{selected_live_folder} (Col 1)", "symbols": l_tv}])
+                    g2_json = json.dumps([{"name": f"{selected_live_folder} (Col 2)", "symbols": r_tv}])
                     with tc1:
-                        components.html(f"""<div class="tradingview-widget-container"><div class="tradingview-widget-container__widget"></div><script type="text/javascript" src="https://s3.tradingview.com/external-embedding/embed-widget-market-quotes.js" async>{{"width": "100%", "height": {wh}, "symbolsGroups": {json.dumps([{"name": f"{selected_live_folder} (Col 1)", "symbols": l_tv}])}, "showSymbolLogo": true, "colorTheme": "light", "locale": "en"}}</script></div>""", height=wh + 16)
+                        components.html(
+                            f'<div class="tradingview-widget-container">'
+                            f'<div class="tradingview-widget-container__widget"></div>'
+                            f'<script type="text/javascript" '
+                            f'src="https://s3.tradingview.com/external-embedding/embed-widget-market-quotes.js" async>'
+                            f'{{"width": "100%", "height": {wh}, "symbolsGroups": {g1_json}, '
+                            f'"showSymbolLogo": true, "colorTheme": "light", "locale": "en"}}'
+                            f'</script></div>',
+                            height=wh + 16
+                        )
                     with tc2:
                         if r_tv:
-                            components.html(f"""<div class="tradingview-widget-container"><div class="tradingview-widget-container__widget"></div><script type="text/javascript" src="https://s3.tradingview.com/external-embedding/embed-widget-market-quotes.js" async>{{"width": "100%", "height": {wh}, "symbolsGroups": {json.dumps([{"name": f"{selected_live_folder} (Col 2)", "symbols": r_tv}])}, "showSymbolLogo": true, "colorTheme": "light", "locale": "en"}}</script></div>""", height=wh + 16)
+                            components.html(
+                                f'<div class="tradingview-widget-container">'
+                                f'<div class="tradingview-widget-container__widget"></div>'
+                                f'<script type="text/javascript" '
+                                f'src="https://s3.tradingview.com/external-embedding/embed-widget-market-quotes.js" async>'
+                                f'{{"width": "100%", "height": {wh}, "symbolsGroups": {g2_json}, '
+                                f'"showSymbolLogo": true, "colorTheme": "light", "locale": "en"}}'
+                                f'</script></div>',
+                                height=wh + 16
+                            )
 
                     pills_b = "".join([f'<a href="?rt_chart={s}" target="_self" class="pill" title="Open Bottom Live Chart">{live_records[s]["TCT_Dot"] if s in live_records else "📈"} {s}</a>' for s in tv_all_syms])
                     st.markdown(f"<div style='margin-top:4px;'><b>Tap any symbol to open Bottom Live Chart:</b><br>{pills_b}</div>", unsafe_allow_html=True)
@@ -1583,8 +1714,7 @@ else:
 
     elif navigation == "Screener":
         st.markdown("<h1>Multi-Playbook & Stage 2 Market Screener</h1>", unsafe_allow_html=True)
-        st.markdown("<p style='color: #52525b; margin-top: -12px;'>Use the One-Tap Strategy Presets (including 掃地僧 Stage 2 低點 & 150-MA Reversal Radar) across Stocks, Indexes, Precious Metals & Crypto.</p>", unsafe_allow_html=True)
-
+        
         all_watchlist_syms = get_all_monitored_tickers()
         mcf_extra = GICS_SECTORS.get("Indexes, Precious Metals & Crypto", [])
         full_market_syms = list(dict.fromkeys([s for s_list in GICS_SECTORS.values() for s in s_list] + all_watchlist_syms))
@@ -1612,18 +1742,18 @@ else:
             st.session_state.screener_title = title_str
             persist_ui_state()
 
-        st.markdown("### 2. One-Tap Strategy Preset Scans (Stage 2 低點 · 150-MA Radar · Momentum · TCT)")
+        st.markdown("### 2. One-Tap Strategy Preset Scans")
         r1_c1, r1_c2, r1_c3, r1_c4 = st.columns(4)
         r2_c1, r2_c2, r2_c3, r2_c4 = st.columns(4)
 
-        if r1_c1.button("📈 Stage 2 Higher Low (低點 Buy)", use_container_width=True, type="primary"):
+        if r1_c1.button("📈 Stage 2 Higher Low", use_container_width=True, type="primary"):
             s_data = fetch_batch_market_data(get_target_universe(list(GICS_SECTORS.keys())), account_size=settings["account_size"])
             res_l = sorted([d for d in s_data.values() if d.get("Is_Stage2_Higher_Low")], key=lambda x: -x["Score"])
-            _save_screener_results(res_l, "📈 掃地僧 Stage 2 Higher Low (第二階段・回調低點 — Ideal Entry)")
+            _save_screener_results(res_l, "📈 Stage 2 Higher Low")
         if r1_c2.button("🔔 150-MA Reversal Radar (Research)", use_container_width=True, type="primary"):
             s_data = fetch_batch_market_data(get_target_universe(list(GICS_SECTORS.keys())), account_size=settings["account_size"])
             res_l = sorted([d for d in s_data.values() if d.get("Is_150MA_Reversal_Radar")], key=lambda x: -x["Score"])
-            _save_screener_results(res_l, "🔔 Just Broke Back Above 150-Day MA (Early Trend Reversal Radar — Start Research)")
+            _save_screener_results(res_l, "🔔 150-MA Reversal Radar")
         if r1_c3.button("🔥 Pure Momentum Leaders", use_container_width=True):
             s_data = fetch_batch_market_data(get_target_universe(list(GICS_SECTORS.keys())), account_size=settings["account_size"])
             res_l = sorted([d for d in s_data.values() if d["Is_Pure_Momentum"]], key=lambda x: -x["RS_Diff"])
@@ -1659,7 +1789,7 @@ else:
                 s1 = st.checkbox("RSI Rising Above 55 (Momentum)", value=False)
                 s4 = st.checkbox("20-Day High Breakout (Volume Confirmed)", value=False)
                 s7 = st.checkbox("Pullback Near 20D or 50D EMA Support", value=False)
-                s_st2 = st.checkbox("📈 Stage 2 Higher Low (低點) Pattern Only", value=False)
+                s_st2 = st.checkbox("📈 Stage 2 Higher Low Only", value=False)
             with f_col3:
                 tct1 = st.checkbox("🟢 Action = 'BUY NOW' / 'SWING BUY'", value=False)
                 tct2 = st.checkbox("📐 True TCT Bottom Accumulation Box Only", value=False)
@@ -1705,8 +1835,11 @@ else:
                 with c1:
                     st.markdown(
                         f"""
-                        <div><a href="?inspect={m['Ticker']}" target="_self" class="ticker-link">📊 {m['Ticker']}</a> <span class="badge {m['TCT_Badge']}">{m['TCT_Action']}</span></div>
-                        <div style="font-size: 0.85rem; color: #71717a; margin-top: 3px;">${m['Price']:,.2f} · <span style="color: {'#15803d' if m['Change']>=0 else '#b91c1c'}; font-weight: 700;">{arr_m}${abs(m['Change']):.2f} ({m['Change_Pct']:+.2f}%)</span> · <b>{m['TCT_Model']}</b></div>
+                        <div><a href="?inspect={m['Ticker']}" target="_self" class="ticker-link">📊 {m['Ticker']}</a>
+                        <span class="badge {m['TCT_Badge']}">{m['TCT_Action']}</span></div>
+                        <div style="font-size: 0.85rem; color: #71717a; margin-top: 3px;">
+                        ${m['Price']:,.2f} · <span style="color: {'#15803d' if m['Change']>=0 else '#b91c1c'}; font-weight: 700;">
+                        {arr_m}${abs(m['Change']):.2f} ({m['Change_Pct']:+.2f}%)</span> · <b>{m['TCT_Model']}</b></div>
                         <div style="font-size: 0.8rem; color: #475569; margin-top: 4px;">{m['TCT_Explain']}</div>
                         """, unsafe_allow_html=True
                     )
@@ -1840,7 +1973,20 @@ else:
                         st.toast("Added")
                         st.rerun()
             with col_sort:
-                sort_by = st.selectbox("Sort By", ["Saved Order (My Custom Sequence)", "Action Signal (Buy Now First)", "Relative Strength vs S&P 500", "Composite Score (High → Low)", "Reward-to-Risk Ratio (High → Low)", "Day % Change (High → Low)", "Alphabetical (A → Z)"], index=0, label_visibility="collapsed")
+                sort_by = st.selectbox(
+                    "Sort By",
+                    [
+                        "Saved Order (My Custom Sequence)",
+                        "Action Signal (Buy Now First)",
+                        "Relative Strength vs S&P 500",
+                        "Composite Score (High → Low)",
+                        "Reward-to-Risk Ratio (High → Low)",
+                        "Day % Change (High → Low)",
+                        "Alphabetical (A → Z)"
+                    ],
+                    index=0,
+                    label_visibility="collapsed"
+                )
             with col_ed:
                 show_reorder = st.checkbox("✏️ Edit / Reorder List", value=False)
 
@@ -1849,7 +1995,7 @@ else:
 
             st.markdown("**One-Tap Strategy Playbook Filter:**")
             wf1, wf2, wf3, wf4, wf5, wf6, wf7, wf8 = st.columns(8)
-            if wf1.button("📈 Stage 2 低點", use_container_width=True, type="primary" if st.session_state.wl_preset_filter == "STAGE2_HL" else "secondary"):
+            if wf1.button("📈 Stage 2 HL", use_container_width=True, type="primary" if st.session_state.wl_preset_filter == "STAGE2_HL" else "secondary"):
                 st.session_state.wl_preset_filter = "STAGE2_HL"; persist_ui_state(); st.rerun()
             if wf2.button("🔔 150MA Radar", use_container_width=True, type="primary" if st.session_state.wl_preset_filter == "REV150" else "secondary"):
                 st.session_state.wl_preset_filter = "REV150"; persist_ui_state(); st.rerun()
@@ -1903,24 +2049,78 @@ else:
             for idx, sym in enumerate(display_symbols):
                 d = data_dict[sym]
                 arr_w = "▲ +" if d["Change"] >= 0 else "▼ -"
-                rs_html = f'<span class="badge badge-rs-lead" style="margin-left: 4px;">🔥 Leading S&P ({d["RS_Diff"]:+.1f}%)</span>' if d["RS_Leader"] else f'<span class="badge badge-rs-lag" style="margin-left: 4px;">RS {d["RS_Diff"]:+.1f}%</span>'
+                if d["RS_Leader"]:
+                    rs_html = f'<span class="badge badge-rs-lead" style="margin-left: 4px;">🔥 Leading S&P ({d["RS_Diff"]:+.1f}%)</span>'
+                else:
+                    rs_html = f'<span class="badge badge-rs-lag" style="margin-left: 4px;">RS {d["RS_Diff"]:+.1f}%</span>'
                 earn_html = ""
                 if sym in earnings_map:
                     days_left, dt_s = earnings_map[sym]
                     if days_left <= 14:
-                        earn_html = f'<div style="margin-top:6px;"><span class="badge badge-earn-warn">⚠️ EARNINGS IN {days_left}d ({dt_s}) — WATCH CATALYST RISK</span></div>'
+                        earn_html = (
+                            f'<div style="margin-top:6px;"><span class="badge badge-earn-warn">'
+                            f'⚠️ EARNINGS IN {days_left}d ({dt_s}) — WATCH CATALYST RISK'
+                            f'</span></div>'
+                        )
 
+                chg_clr = "#15803d" if d["Change"] >= 0 else "#b91c1c"
                 with (left_c if idx % 2 == 0 else right_c):
                     st.markdown(
-                        f'<div class="stock-card"><div style="display: flex; justify-content: space-between; align-items: flex-start;"><div><a href="?inspect={d["Ticker"]}" target="_self" class="ticker-link">📊 {d["Ticker"]}</a><span class="badge {d["TCT_Badge"]}" style="margin-left: 8px;">{d["TCT_Action"]}</span>{rs_html}{earn_html}<div style="font-size: 1.35rem; font-weight: 700; margin-top: 6px;">${d["Price"]:,.2f} <span style="font-size: 0.9rem; color: {"#15803d" if d["Change"]>=0 else "#b91c1c"}; font-weight: 700;">{arr_w}${abs(d["Change"]):.2f} ({d["Change_Pct"]:+.2f}%)</span></div></div><div style="text-align: right;"><div style="font-size: 1.6rem; font-weight: 700; color: #c5a059; font-family: Newsreader, serif;">{d["Score"]}</div><div style="font-size: 0.7rem; color: #71717a; text-transform: uppercase;">Score</div></div></div><div class="trade-ticket"><div style="display: flex; justify-content: space-between; font-weight: 700; color: #0f291e; margin-bottom: 4px;"><span>{d["TCT_Model"]}</span><span>📐 Reward/Risk: {d["R_Multiple"]:.1f}R</span></div><div style="display: flex; justify-content: space-between;"><span>🎯 <b>Buy Trigger:</b> ${d["BOS_Level"]:,.2f}</span><span>🟢 <b>Take Profit:</b> <span style="color:#15803d; font-weight:700;">${d["Target_Price"]:,.2f}</span> (+{d["Target_Pct"]:.1f}%)</span></div><div style="margin-top: 4px; display: flex; justify-content: space-between;"><span>🔴 <b>Stop-Loss:</b> <span style="color:#b91c1c; font-weight:700;">${d["Stop_Price"]:,.2f}</span> ({d["Stop_Pct"]:.1f}%)</span><span><b>0.5% Size:</b> {d["Shares_05Pct"]} shs (${d["Pos_Value"]:,.0f})</span></div></div><div style="display: flex; justify-content: space-between; align-items: center; margin-top: 8px; font-size: 0.78rem; color: #52525b;"><div>Day High: <b>${d["Day_High"]:,.2f}</b></div><div>Day Low: <b>${d["Day_Low"]:,.2f}</b></div><div>RSI(14/2): <b>{d["RSI"]:.0f}/{d["RSI2"]:.0f}</b></div><div>EMA 50: <b>${d["EMA50_Val"]:,.2f}</b></div></div><div style="font-size: 0.80rem; color: #475569; margin-top: 6px; font-style: italic;">"{d["TCT_Explain"]}"</div></div>',
+                        f'<div class="stock-card">'
+                        f'<div style="display: flex; justify-content: space-between; align-items: flex-start;">'
+                        f'<div><a href="?inspect={d["Ticker"]}" target="_self" class="ticker-link">📊 {d["Ticker"]}</a>'
+                        f'<span class="badge {d["TCT_Badge"]}" style="margin-left: 8px;">{d["TCT_Action"]}</span>'
+                        f'{rs_html}{earn_html}'
+                        f'<div style="font-size: 1.35rem; font-weight: 700; margin-top: 6px;">'
+                        f'${d["Price"]:,.2f} <span style="font-size: 0.9rem; color: {chg_clr}; font-weight: 700;">'
+                        f'{arr_w}${abs(d["Change"]):.2f} ({d["Change_Pct"]:+.2f}%)</span></div></div>'
+                        f'<div style="text-align: right;">'
+                        f'<div style="font-size: 1.6rem; font-weight: 700; color: #c5a059; font-family: Newsreader, serif;">'
+                        f'{d["Score"]}</div>'
+                        f'<div style="font-size: 0.7rem; color: #71717a; text-transform: uppercase;">Score</div>'
+                        f'</div></div>'
+                        f'<div class="trade-ticket">'
+                        f'<div style="display: flex; justify-content: space-between; font-weight: 700; color: #0f291e; margin-bottom: 4px;">'
+                        f'<span>{d["TCT_Model"]}</span><span>📐 Reward/Risk: {d["R_Multiple"]:.1f}R</span></div>'
+                        f'<div style="display: flex; justify-content: space-between;">'
+                        f'<span>🎯 <b>Buy Trigger:</b> ${d["BOS_Level"]:,.2f}</span>'
+                        f'<span>🟢 <b>Take Profit:</b> <span style="color:#15803d; font-weight:700;">'
+                        f'${d["Target_Price"]:,.2f}</span> (+{d["Target_Pct"]:.1f}%)</span></div>'
+                        f'<div style="margin-top: 4px; display: flex; justify-content: space-between;">'
+                        f'<span>🔴 <b>Stop-Loss:</b> <span style="color:#b91c1c; font-weight:700;">'
+                        f'${d["Stop_Price"]:,.2f}</span> ({d["Stop_Pct"]:.1f}%)</span>'
+                        f'<span><b>0.5% Size:</b> {d["Shares_05Pct"]} shs (${d["Pos_Value"]:,.0f})</span></div></div>'
+                        f'<div style="display: flex; justify-content: space-between; align-items: center; margin-top: 8px; font-size: 0.78rem; color: #52525b;">'
+                        f'<div>Day High: <b>${d["Day_High"]:,.2f}</b></div>'
+                        f'<div>Day Low: <b>${d["Day_Low"]:,.2f}</b></div>'
+                        f'<div>RSI(14/2): <b>{d["RSI"]:.0f}/{d["RSI2"]:.0f}</b></div>'
+                        f'<div>EMA 50: <b>${d["EMA50_Val"]:,.2f}</b></div></div>'
+                        f'<div style="font-size: 0.80rem; color: #475569; margin-top: 6px; font-style: italic;">'
+                        f'"{d["TCT_Explain"]}"</div></div>',
                         unsafe_allow_html=True
                     )
 
     elif navigation == "Precious Metals, Crypto & Currency":
         st.markdown("<h1>Precious Metals, Crypto & Currency</h1>", unsafe_allow_html=True)
-        METALS_GROUP = {"Gold Futures / Spot (USD/oz)": "GC=F", "Silver Futures / Spot (USD/oz)": "SI=F", "Copper Futures (USD/lb)": "HG=F", "Platinum Futures (USD/oz)": "PL=F", "SPDR Gold Trust ETF (GLD)": "GLD", "iShares Silver Trust ETF (SLV)": "SLV"}
-        CRYPTO_GROUP = {"Bitcoin (BTC/USD)": "BTC-USD", "Ethereum (ETH/USD)": "ETH-USD", "XRP (XRP/USD)": "XRP-USD", "Solana (SOL/USD)": "SOL-USD"}
-        FX_GROUP = {"US Dollar Index (DXY)": "DX-Y.NYB", "USD / JPY": "JPY=X", "EUR / USD": "EURUSD=X"}
+        METALS_GROUP = {
+            "Gold Futures / Spot (USD/oz)": "GC=F",
+            "Silver Futures / Spot (USD/oz)": "SI=F",
+            "Copper Futures (USD/lb)": "HG=F",
+            "Platinum Futures (USD/oz)": "PL=F",
+            "SPDR Gold Trust ETF (GLD)": "GLD",
+            "iShares Silver Trust ETF (SLV)": "SLV"
+        }
+        CRYPTO_GROUP = {
+            "Bitcoin (BTC/USD)": "BTC-USD",
+            "Ethereum (ETH/USD)": "ETH-USD",
+            "XRP (XRP/USD)": "XRP-USD",
+            "Solana (SOL/USD)": "SOL-USD"
+        }
+        FX_GROUP = {
+            "US Dollar Index (DXY)": "DX-Y.NYB",
+            "USD / JPY": "JPY=X",
+            "EUR / USD": "EURUSD=X"
+        }
 
         all_mcf_syms = list(METALS_GROUP.values()) + list(CRYPTO_GROUP.values()) + list(FX_GROUP.values())
         mcf_data = fetch_batch_market_data(all_mcf_syms, account_size=settings["account_size"])
@@ -1970,22 +2170,48 @@ else:
 
         with n_col1:
             n_tab1, n_tab2 = st.tabs([f"Watchlist News ({len(tracked_symbols)} Stocks)", "Metals, Crypto & USD News"])
+            def _render_catalyst_news(articles):
+                items_html = []
+                for a in articles:
+                    items_html.append(
+                        f'<div style="background: white; border: 1px solid #e7e2d9; border-radius: 8px; '
+                        f'padding: 12px 16px; margin-bottom: 8px;">'
+                        f'<div style="display: flex; justify-content: space-between; font-size: 0.72rem; color: #71717a;">'
+                        f'<span style="font-weight: 700; color: #0f291e;">'
+                        f'<span class="ticker-news-badge">[{a.get("ticker", "ALERT")}]</span> '
+                        f'{a["publisher"]}<span class="age-badge">{a["age"]}</span></span>'
+                        f'<span>{a["date"]}</span></div>'
+                        f'<div style="font-weight: 600; font-size: 0.92rem; margin-top: 4px;">'
+                        f'<a href="{a["link"]}" target="_blank" style="color: #0f291e; text-decoration: none;">'
+                        f'{a["title"]}</a></div></div>'
+                    )
+                st.markdown('<div class="scroll-news-box">' + "".join(items_html) + '</div>', unsafe_allow_html=True)
+
             with n_tab1:
                 pool_articles = fetch_watchlist_news_pool(tracked_symbols, max_items=settings["news_limit"], max_age_hours=settings["max_news_age_hours"])
                 if pool_articles:
-                    news_html = '<div class="scroll-news-box">' + "".join([f'<div style="background: white; border: 1px solid #e7e2d9; border-radius: 8px; padding: 12px 16px; margin-bottom: 8px;"><div style="display: flex; justify-content: space-between; font-size: 0.72rem; color: #71717a;"><span style="font-weight: 700; color: #0f291e;"><span class="ticker-news-badge">[{a.get("ticker", "ALERT")}]</span> {a["publisher"]}<span class="age-badge">{a["age"]}</span></span><span>{a["date"]}</span></div><div style="font-weight: 600; font-size: 0.92rem; margin-top: 4px;"><a href="{a["link"]}" target="_blank" style="color: #0f291e; text-decoration: none;">{a["title"]}</a></div></div>' for a in pool_articles]) + '</div>'
-                    st.markdown(news_html, unsafe_allow_html=True)
+                    _render_catalyst_news(pool_articles)
             with n_tab2:
                 mcf_articles = fetch_metals_crypto_fx_news(max_items=settings["news_limit"], max_age_hours=settings["max_news_age_hours"])
                 if mcf_articles:
-                    c_html = '<div class="scroll-news-box">' + "".join([f'<div style="background: white; border: 1px solid #e7e2d9; border-radius: 8px; padding: 12px 16px; margin-bottom: 8px;"><div style="display: flex; justify-content: space-between; font-size: 0.72rem; color: #71717a;"><span style="font-weight: 700; color: #0f291e;"><span class="ticker-news-badge">[{a["ticker"]}]</span> {a["publisher"]}<span class="age-badge">{a["age"]}</span></span><span>{a["date"]}</span></div><div style="font-weight: 600; font-size: 0.92rem; margin-top: 4px;"><a href="{a["link"]}" target="_blank" style="color: #0f291e; text-decoration: none;">{a["title"]}</a></div></div>' for a in mcf_articles]) + '</div>'
-                    st.markdown(c_html, unsafe_allow_html=True)
+                    _render_catalyst_news(mcf_articles)
 
         with n_col2:
             st.subheader("Upcoming Earnings Calendar")
             earnings_map = fetch_upcoming_earnings_map(tracked_symbols)
             if earnings_map:
-                rows = sorted([{"Ticker": s, "Earnings Date": dt_str, "Countdown": f"{days_left}d" + (" ⚠️" if days_left <= 7 else ""), "_sort": days_left} for s, (days_left, dt_str) in earnings_map.items()], key=lambda x: x["_sort"])
+                rows = sorted(
+                    [
+                        {
+                            "Ticker": s,
+                            "Earnings Date": dt_str,
+                            "Countdown": f"{days_left}d" + (" ⚠️" if days_left <= 7 else ""),
+                            "_sort": days_left
+                        }
+                        for s, (days_left, dt_str) in earnings_map.items()
+                    ],
+                    key=lambda x: x["_sort"]
+                )
                 st.table(pd.DataFrame([{"Ticker": r["Ticker"], "Earnings Date": r["Earnings Date"], "Countdown": r["Countdown"]} for r in rows]))
             else:
                 st.info("No confirmed upcoming earnings within the next 60 days.")
@@ -2016,7 +2242,7 @@ else:
                 tct_boxes = [f"{k} (BOS ${v['BOS_Level']:.2f})" for k, v in current_data.items() if v["TCT_Valid_Range"] and v["TCT_Priority"] != 0]
                 sells = [f"{k} (${v['Price']:.2f})" for k, v in current_data.items() if v["TCT_Priority"] == 4]
                 summary_msg = (
-                    f"📈 STAGE 2 HIGHER LOW 低點 ({len(st2_hl)}): {', '.join(st2_hl[:6]) if st2_hl else 'None'}\n"
+                    f"📈 STAGE 2 HIGHER LOW ({len(st2_hl)}): {', '.join(st2_hl[:6]) if st2_hl else 'None'}\n"
                     f"🔔 150-MA REVERSAL RADAR ({len(rev_150)}): {', '.join(rev_150[:6]) if rev_150 else 'None'}\n"
                     f"🟢 ALL BUY / SWING TRIGGERS ({len(buys)}): {', '.join(buys[:6]) if buys else 'None'}\n"
                     f"📐 In TCT Bottom Box ({len(tct_boxes)}): {', '.join(tct_boxes[:6]) if tct_boxes else 'None'}\n"
@@ -2035,4 +2261,12 @@ else:
                     "Take_Profit_Target": d["Target_Price"], "Stop_Loss": d["Stop_Price"],
                     "Reward_Risk_R": round(d["R_Multiple"], 2), "Suggested_Shares_05Pct": d["Shares_05Pct"]
                 } for sym_name, d in current_data.items()])
-                st.download_button("📥 Download Full 6-Playbook Plan CSV", df_export.to_csv(index=False).encode("utf-8"), f"tct_swing_plan_{datetime.now().strftime('%Y%m%d_%H%M')}.csv", "text/csv", type="primary")
+                csv_bytes = df_export.to_csv(index=False).encode("utf-8")
+                csv_fname = f"tct_swing_plan_{datetime.now().strftime('%Y%m%d_%H%M')}.csv"
+                st.download_button(
+                    "📥 Download Full 6-Playbook Plan CSV",
+                    csv_bytes,
+                    csv_fname,
+                    "text/csv",
+                    type="primary"
+                )
