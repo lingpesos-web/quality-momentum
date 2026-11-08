@@ -38,5 +38,15 @@
     "StopLoss": 232.30800000000002,
     "Target15": 296.83799999999997,
     "HalfSold": false
+  },
+  {
+    "id": "PLTR_1794116278",
+    "Ticker": "PLTR",
+    "BuyPrice": 160.0,
+    "Shares": 200,
+    "BuyDate": "2026-11-06",
+    "StopLoss": 144.0,
+    "Target15": 184.0,
+    "HalfSold": false
   }
 ]
