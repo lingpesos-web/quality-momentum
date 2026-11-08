@@ -48,5 +48,15 @@
     "StopLoss": 144.0,
     "Target15": 184.0,
     "HalfSold": false
+  },
+  {
+    "id": "SOXL_1794116312",
+    "Ticker": "SOXL",
+    "BuyPrice": 45.0,
+    "Shares": 100,
+    "BuyDate": "2026-11-06",
+    "StopLoss": 40.5,
+    "Target15": 51.74999999999999,
+    "HalfSold": false
   }
 ]
