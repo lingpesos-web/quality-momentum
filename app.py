@@ -7,6 +7,7 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import json
 import os
+import io
 import time
 import base64
 import urllib.request
@@ -27,6 +28,7 @@ st.set_page_config(
 STATE_FILE = "alert_state.json"
 DATA_FILE = "watchlists.json"
 POSITIONS_FILE = "positions.json"
+LEDGER_FILE = "trade_ledger.json"
 SETTINGS_FILE = "settings.json"
 UI_STATE_FILE = "ui_state.json"
 GITHUB_REPO = "lingpesos-web/quality-momentum"
@@ -72,7 +74,9 @@ for k, v in [
   ("screener_tickers", saved_ui.get("screener_tickers", None)),
   ("screener_title", saved_ui.get("screener_title", None)),
   ("wl_preset_filter", saved_ui.get("wl_preset_filter", "ALL")),
-  ("last_good_data", {})
+  ("last_good_data", {}),
+  ("chat_messages", []),
+  ("sds_videos", [])
 ]:
   if k not in st.session_state:
     st.session_state[k] = v
@@ -187,6 +191,9 @@ for k_def, v_def in DEFAULT_WATCHLISTS.items():
   if k_def not in watchlists or not isinstance(watchlists[k_def], list):
     watchlists[k_def] = v_def
 positions = load_json(POSITIONS_FILE, [])
+trade_ledger = load_json(LEDGER_FILE, [])
+if not isinstance(trade_ledger, list):
+  trade_ledger = []
 
 def get_all_monitored_tickers():
   combined = []
@@ -903,9 +910,15 @@ def fetch_single_ticker_data(sym, account_size=100000, period="5y", interval="1d
   except Exception:
     return base_rec
 
-@st.cache_data(ttl=86400)
+@st.cache_data(ttl=14400)
 def fetch_ticker_fundamentals(ticker_symbol):
-  data = {"Market Cap": "N/A", "Trailing P/E": "N/A", "Forward P/E": "N/A", "EPS (TTM)": "N/A", "Target Price": "N/A", "52W High": "N/A", "52W Low": "N/A", "Debt/Equity": "N/A", "Business Summary": "No corporate overview provided."}
+  data = {
+    "Company Name": ticker_symbol, "Market Cap": "N/A", "Trailing P/E": "N/A",
+    "Forward P/E": "N/A", "EPS (TTM)": "N/A", "Target Price": "N/A",
+    "52W High": "N/A", "52W Low": "N/A", "All-Time High": "N/A", "All-Time Low": "N/A",
+    "Earnings Date": "No upcoming (60d)", "Debt/Equity": "N/A",
+    "Business Summary": "No corporate overview provided."
+  }
   try:
     t = yf.Ticker(ticker_symbol)
     info = {}
@@ -914,6 +927,8 @@ def fetch_ticker_fundamentals(ticker_symbol):
     except Exception:
       info = {}
     fast = getattr(t, "fast_info", None)
+    c_name = info.get("shortName") or info.get("longName") or ticker_symbol
+    data["Company Name"] = str(c_name).strip()
     data["Market Cap"] = info.get("marketCap") or (getattr(fast, "market_cap", None) if fast else "N/A") or "N/A"
     data["Trailing P/E"] = info.get("trailingPE") or info.get("trailingPe") or "N/A"
     data["Forward P/E"] = info.get("forwardPE") or info.get("forwardPe") or "N/A"
@@ -923,6 +938,17 @@ def fetch_ticker_fundamentals(ticker_symbol):
     data["52W Low"] = info.get("fiftyTwoWeekLow") or (getattr(fast, "year_low", None) if fast else "N/A") or "N/A"
     data["Debt/Equity"] = info.get("debtToEquity", "N/A")
     data["Business Summary"] = info.get("longBusinessSummary", "No corporate overview provided.")
+    try:
+      h_max = t.history(period="max", interval="1mo")
+      if h_max is not None and not h_max.empty:
+        data["All-Time High"] = float(h_max["High"].max())
+        data["All-Time Low"] = float(h_max["Low"].min())
+    except Exception:
+      pass
+    e_map = fetch_upcoming_earnings_map([ticker_symbol])
+    if ticker_symbol in e_map:
+      d_left, d_str = e_map[ticker_symbol]
+      data["Earnings Date"] = f"{d_str} (in {d_left}d)"
   except Exception:
     pass
   return data
@@ -1541,7 +1567,17 @@ st.sidebar.markdown(
 )
 navigation = st.sidebar.radio(
   "Navigation",
-  ["Dashboard", "⚡ Live Real-Time Quotes", "Screener", "Watchlist", "Precious Metals, Crypto & Currency", "News & Earnings", "Settings"],
+  [
+    "Dashboard",
+    "💼 Active Positions",
+    "⚡ Live Real-Time Quotes",
+    "Screener",
+    "Watchlist",
+    "Precious Metals, Crypto & Currency",
+    "🤖 AI Macro & Trade Co-Pilot",
+    "News & Earnings",
+    "Settings"
+  ],
   key="nav_radio", label_visibility="collapsed", on_change=clear_inspection
 )
 st.sidebar.markdown("---")
@@ -1568,13 +1604,16 @@ if navigation != "⚡ Live Real-Time Quotes" or st.session_state.inspect_symbol 
 
 if st.session_state.inspect_symbol is not None:
   sym = st.session_state.inspect_symbol
+  funds = fetch_ticker_fundamentals(sym)
+  comp_name = funds.get("Company Name", sym)
+  header_label = f"{sym} - {comp_name}" if comp_name and comp_name.upper() != sym.upper() else sym
   col_back, col_title = st.columns([1.2, 8.8])
   with col_back:
     if st.button("⬅ Back", type="primary"):
       clear_inspection()
       st.rerun()
   with col_title:
-    st.markdown(f"<h1>{sym} · 6-Playbook Technical & Fundamental Dossier</h1>", unsafe_allow_html=True)
+    st.markdown(f"<h1>{header_label}</h1>", unsafe_allow_html=True)
   c_ctrl, c_plot = st.columns([1.15, 3.85])
   with c_ctrl:
     st.markdown("### Chart Timeframe")
@@ -1608,7 +1647,6 @@ if st.session_state.inspect_symbol is not None:
     show_ema200 = st.checkbox("EMA 200 (Purple)", value=False)
     show_bb = st.checkbox("Bollinger Bands (20, 2)", value=False)
   d = fetch_single_ticker_data(sym, account_size=settings["account_size"], period=chart_period, interval=chart_bar_interval)
-  funds = fetch_ticker_fundamentals(sym)
   if d is not None:
     df_hist = d["History"]
     if "EMA150" not in df_hist.columns:
@@ -1618,6 +1656,29 @@ if st.session_state.inspect_symbol is not None:
     raw_mcap = funds.get("Market Cap")
     mcap_text = f"${raw_mcap/1e9:.1f}B" if isinstance(raw_mcap, (int, float)) and raw_mcap > 0 else "N/A"
     ma150_val = float(df_hist["SMA150"].iloc[-1]) if ma150_type == "SMA 150" else float(df_hist["EMA150"].iloc[-1])
+    t_pe = funds.get("Trailing P/E", "N/A")
+    f_pe = funds.get("Forward P/E", "N/A")
+    pe_text = f"{t_pe:.1f}" if isinstance(t_pe, (int, float)) else str(t_pe)
+    fpe_text = f"{f_pe:.1f}" if isinstance(f_pe, (int, float)) else str(f_pe)
+    raw_tgt = funds.get("Target Price", "N/A")
+    if isinstance(raw_tgt, (int, float)) and raw_tgt > 0:
+      tgt_upside = ((raw_tgt - d["Price"]) / d["Price"]) * 100.0
+      analyst_tgt_text = f"${raw_tgt:,.2f} ({tgt_upside:+.1f}%)"
+    else:
+      analyst_tgt_text = "N/A"
+    w52_h = funds.get("52W High", "N/A")
+    w52_l = funds.get("52W Low", "N/A")
+    w52_text = (
+      f"${w52_h:,.2f} / ${w52_l:,.2f}"
+      if isinstance(w52_h, (int, float)) and isinstance(w52_l, (int, float))
+      else f"{w52_h} / {w52_l}"
+    )
+    ath_raw = funds.get("All-Time High")
+    atl_raw = funds.get("All-Time Low")
+    ath_val = max(float(df_hist["High"].max()), float(ath_raw) if isinstance(ath_raw, (int, float)) else 0.0)
+    atl_val = min(float(df_hist["Low"].min()), float(atl_raw) if isinstance(atl_raw, (int, float)) and atl_raw > 0 else float(df_hist["Low"].min()))
+    hist_hl_text = f"${ath_val:,.2f} / ${atl_val:,.2f}"
+    earn_text = funds.get("Earnings Date", "No upcoming (60d)")
     with c_ctrl:
       st.markdown("---")
       st.markdown("### Action Trade Ticket")
@@ -1632,7 +1693,12 @@ if st.session_state.inspect_symbol is not None:
       st.markdown(f"**RSI(14) / RSI(2):** `{d['RSI']:.1f}` / `{d['RSI2']:.0f}`")
       st.markdown(f"*{d['TCT_Explain']}*")
       st.markdown("---")
-      st.markdown(f"**Market Cap:** `{mcap_text}` | **P/E:** `{funds.get('Trailing P/E', 'N/A')}`")
+      st.markdown(f"**Market Cap:** `{mcap_text}`")
+      st.markdown(f"**P/E (Trail / Fwd):** `{pe_text}` / `{fpe_text}`")
+      st.markdown(f"**Analyst Target:** `{analyst_tgt_text}`")
+      st.markdown(f"**52W High / Low:** `{w52_text}`")
+      st.markdown(f"**History High / Low:** `{hist_hl_text}`")
+      st.markdown(f"**Earnings Day:** `{earn_text}`")
     with c_plot:
       f1, f2, f3, f4, f5, f6 = st.columns(6)
       f1.metric("Price", f"${d['Price']:,.2f}", f"{'+' if d['Change']>=0 else ''}{d['Change_Pct']:.2f}%")
