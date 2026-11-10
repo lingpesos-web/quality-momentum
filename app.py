@@ -136,22 +136,61 @@ def clear_inspection():
   persist_ui_state()
 
 def send_ntfy_alert(message, title="Daily Portfolio Briefing"):
-  try:
-    ascii_title = title.encode("ascii", "ignore").decode("ascii").strip() or "Market Alert"
-    req = urllib.request.Request(
-      "https://ntfy.sh/2026_USstockspicks",
-      data=message.encode("utf-8"),
-      headers={
-        "Title": ascii_title,
-        "Priority": "high",
-        "Content-Type": "text/plain; charset=utf-8"
-      },
-      method="POST"
-    )
-    with urllib.request.urlopen(req, timeout=8) as resp:
-      return True, f"Delivered (HTTP {resp.status}) to topic '2026_USstockspicks'"
-  except Exception as e:
-    return False, f"ntfy error: {str(e)}"
+  ch = settings.get("notif_channel", "ntfy Push")
+  if ch == "Disabled (In-App Toast Only)":
+    return True, "External push disabled (In-App Toast Only mode)."
+  statuses = []
+  any_ok = False
+  ascii_title = title.encode("ascii", "ignore").decode("ascii").strip() or "Market Alert"
+
+  if ch in ("ntfy Push", "Both ntfy & Telegram"):
+    topic = str(settings.get("ntfy_topic", "")).strip()
+    if topic:
+      try:
+        req = urllib.request.Request(
+          f"https://ntfy.sh/{ urllib.parse.quote(topic) }",
+          data=message.encode("utf-8"),
+          headers={
+            "Title": ascii_title,
+            "Priority": "high",
+            "Content-Type": "text/plain; charset=utf-8"
+          },
+          method="POST"
+        )
+        with urllib.request.urlopen(req, timeout=8) as resp:
+          any_ok = True
+          statuses.append(f"ntfy '{topic}' (HTTP {resp.status})")
+      except Exception as e:
+        statuses.append(f"ntfy error: {str(e)[:60]}")
+    else:
+      statuses.append("ntfy topic is empty")
+
+  if ch in ("Telegram Bot", "Both ntfy & Telegram"):
+    tg_token = str(settings.get("tg_bot_token", "")).strip()
+    tg_chat = str(settings.get("tg_chat_id", "")).strip()
+    if tg_token and tg_chat:
+      try:
+        tg_url = f"https://api.telegram.org/bot{tg_token}/sendMessage"
+        tg_payload = json.dumps({
+          "chat_id": tg_chat,
+          "text": f"*{title}*\n{message}",
+          "parse_mode": "Markdown"
+        }).encode("utf-8")
+        req_tg = urllib.request.Request(
+          tg_url,
+          data=tg_payload,
+          headers={"Content-Type": "application/json"},
+          method="POST"
+        )
+        with urllib.request.urlopen(req_tg, timeout=8) as resp_tg:
+          any_ok = True
+          statuses.append(f"Telegram (HTTP {resp_tg.status})")
+      except Exception as e:
+        statuses.append(f"Telegram error: {str(e)[:60]}")
+    else:
+      statuses.append("Telegram Bot Token or Chat ID missing")
+
+  return any_ok, " · ".join(statuses) if statuses else "No notification channel configured."
 
 # --- CUSTOM CSS: MANUS EDITORIAL THEME + LARGE-FONT 2-COLUMN LIVE BOARD ---
 st.markdown("""
@@ -224,11 +263,19 @@ def get_all_monitored_tickers():
     if isinstance(folder_syms, list):
       combined.extend([str(s).strip().upper() for s in folder_syms if str(s).strip()])
   return list(dict.fromkeys(combined))
+DEFAULT_NTFY_TOPIC = "2026_USstockspicks" if not ACTIVE_USER else f"stocks_{ACTIVE_USER}"
 settings = load_json(SETTINGS_FILE, {
   "w_fund": 40, "w_tech": 40, "w_mom": 20, "account_size": 100000,
-  "news_limit": 60, "max_news_age_hours": 72, "alert_breakout": True, "alert_support": True
+  "news_limit": 60, "max_news_age_hours": 72, "alert_breakout": True, "alert_support": True,
+  "notif_channel": "ntfy Push", "ntfy_topic": DEFAULT_NTFY_TOPIC,
+  "tg_bot_token": "", "tg_chat_id": ""
 })
-for k_s, v_s in [("account_size", 100000), ("news_limit", 60), ("max_news_age_hours", 72), ("w_fund", 40), ("w_tech", 40), ("w_mom", 20)]:
+for k_s, v_s in [
+  ("account_size", 100000), ("news_limit", 60), ("max_news_age_hours", 72),
+  ("w_fund", 40), ("w_tech", 40), ("w_mom", 20),
+  ("notif_channel", "ntfy Push"), ("ntfy_topic", DEFAULT_NTFY_TOPIC),
+  ("tg_bot_token", ""), ("tg_chat_id", "")
+]:
   if k_s not in settings:
     settings[k_s] = v_s
 GICS_SECTORS = {
@@ -2545,21 +2592,72 @@ ${m['Price']:,.2f} · <span style="color:{'#15803d' if m['Change']>=0 else '#b91
     st.markdown("<h1>Settings & Strategy Calibration</h1>", unsafe_allow_html=True)
     s_col1, s_col2 = st.columns(2)
     with s_col1:
+      st.subheader("1. Account Risk & Composite Score Weights")
       acc_val = st.number_input("Total Trading Account Size ($ USD) — For 0.5% Risk Share Sizing", min_value=1000, max_value=50000000, value=int(settings.get("account_size", 100000)), step=5000)
       news_lim = st.slider("Max News Headlines in Scrollable Feed", 20, 100, int(settings.get("news_limit", 60)), 10)
       max_age_h = st.slider("Strict News Age Cutoff (Hours)", 24, 120, int(settings.get("max_news_age_hours", 72)), 12)
-      w_f = st.slider("Fundamentals Weight", 0, 100, settings["w_fund"])
-      w_t = st.slider("Technical Trend Weight", 0, 100, settings["w_tech"])
-      w_m = st.slider("Momentum Weight", 0, 100, settings["w_mom"])
-      if st.button("Save All Settings", type="primary"):
+      w_f = st.slider("Fundamentals Base Weight (%)", 0, 100, int(settings.get("w_fund", 40)))
+      w_t = st.slider("Technical Trend Weight (%)", 0, 100, int(settings.get("w_tech", 40)))
+      w_m = st.slider("Momentum & Breakout Weight (%)", 0, 100, int(settings.get("w_mom", 20)))
+      if st.button("Save Account & Scoring Settings", type="primary", use_container_width=True):
         settings.update({"account_size": acc_val, "news_limit": news_lim, "max_news_age_hours": max_age_h, "w_fund": w_f, "w_tech": w_t, "w_mom": w_m})
-        save_json(SETTINGS_FILE, settings)
+        ok_s, msg_s = sync_file_to_github(settings, SETTINGS_FILE)
         st.cache_data.clear()
-        st.success("Settings saved and cache refreshed!")
+        st.success(f"Settings saved! ({msg_s})")
+
     with s_col2:
-      st.subheader("Push Notifications (Live & Daily Briefing)")
+      st.subheader("2. Personal Notification Channel Setup (ntfy / Telegram)")
+      st.caption("Configure where your live buy triggers, stop-loss alerts, and daily briefings are delivered. Each user (?user=name) has their own isolated notification settings.")
+      ch_options = ["ntfy Push", "Telegram Bot", "Both ntfy & Telegram", "Disabled (In-App Toast Only)"]
+      curr_ch = settings.get("notif_channel", "ntfy Push")
+      ch_idx = ch_options.index(curr_ch) if curr_ch in ch_options else 0
+      sel_ch = st.selectbox("Active Notification Channel", ch_options, index=ch_idx)
+
+      ntfy_val = st.text_input(
+        "ntfy Topic Name (Subscribe at https://ntfy.sh/your_topic)",
+        value=str(settings.get("ntfy_topic", DEFAULT_NTFY_TOPIC)),
+        placeholder="e.g. 2026_USstockspicks or bran_stocks_alert"
+      )
+      tg_c1, tg_c2 = st.columns(2)
+      tg_tok_val = tg_c1.text_input(
+        "Telegram Bot Token (Optional)",
+        value=str(settings.get("tg_bot_token", "")),
+        type="password",
+        placeholder="123456:ABC-DEF..."
+      )
+      tg_chat_val = tg_c2.text_input(
+        "Telegram Chat ID (Optional)",
+        value=str(settings.get("tg_chat_id", "")),
+        placeholder="e.g. 987654321"
+      )
+
+      with st.expander("How to set up your own ntfy Topic or Telegram Bot (30 Seconds)", expanded=False):
+        st.markdown(
+          "- **Option A — ntfy (Easiest, No Account Needed):** Pick any unique topic name above (e.g. `bran_us_stocks`). "
+          "On your phone (ntfy app) or PC browser, open `https://ntfy.sh/bran_us_stocks` and click **Subscribe**.\n"
+          "- **Option B — Telegram Bot:** In Telegram, message **@BotFather** and send `/newbot` to get a **Bot Token**. "
+          "Then message **@userinfobot** (or your bot) to get your numeric **Chat ID**, paste both above, and click Save."
+        )
+
+      btn_n1, btn_n2 = st.columns(2)
+      if btn_n1.button("Save Notification Channel", type="primary", use_container_width=True):
+        settings.update({
+          "notif_channel": sel_ch,
+          "ntfy_topic": ntfy_val.strip(),
+          "tg_bot_token": tg_tok_val.strip(),
+          "tg_chat_id": tg_chat_val.strip()
+        })
+        ok_n, msg_n = sync_file_to_github(settings, SETTINGS_FILE)
+        st.success(f"Notification channel saved! ({msg_n})")
+
       current_data = fetch_batch_market_data(get_all_monitored_tickers(), account_size=settings["account_size"])
-      if st.button("Send Live 8-Playbook Briefing Ping to iPad Now", type="primary"):
+      if btn_n2.button("Send Live 8-Playbook Briefing Now", use_container_width=True):
+        settings.update({
+          "notif_channel": sel_ch,
+          "ntfy_topic": ntfy_val.strip(),
+          "tg_bot_token": tg_tok_val.strip(),
+          "tg_chat_id": tg_chat_val.strip()
+        })
         st2_hl = [f"{k} (${v['Price']:.2f})" for k, v in current_data.items() if v.get("Is_Stage2_Higher_Low")]
         rev_150 = [f"{k} (${v['Price']:.2f} > 150MA ${v.get('SMA150_Val', v['Price']):.2f})" for k, v in current_data.items() if v.get("Is_150MA_Reversal_Radar")]
         buys = [f"{k} ({v['TCT_Short_Sig']} @ ${v['Price']:.2f} -> Tgt ${v['Target_Price']:.2f})" for k, v in current_data.items() if v["TCT_Priority"] == 0]
@@ -2574,9 +2672,10 @@ ${m['Price']:,.2f} · <span style="color:{'#15803d' if m['Change']>=0 else '#b91
         )
         ok, status_msg = send_ntfy_alert(summary_msg, "Daily Portfolio Briefing")
         if ok:
-          st.success(f"{status_msg}")
+          st.success(f"Sent: {status_msg}")
         else:
-          st.error(f"{status_msg}")
+          st.error(f"Failed: {status_msg}")
+
       st.markdown("---")
       if current_data:
         df_export = pd.DataFrame([{
@@ -2594,66 +2693,103 @@ ${m['Price']:,.2f} · <span style="color:{'#15803d' if m['Change']>=0 else '#b91
           csv_bytes,
           csv_fname,
           "text/csv",
-          type="primary"
+          type="primary",
+          use_container_width=True
         )
 
     st.markdown("---")
-    st.subheader("8-Playbook Strategy & Technical Parameter Reference Guide")
-    st.caption("Complete specification of the moving averages, volume multipliers, RSI thresholds, and stop/target formulas used across the dashboard.")
-    playbook_ref_df = pd.DataFrame([
-      {
-        "Playbook / Filter": "Playbook 1: TCT Bottom Box",
-        "Moving Averages Used": "150-SMA & 50-EMA context; 1H / 5D Swing High BOS",
-        "Entry / Trigger Criteria": "Decline >= 8% from 130D peak over >= 25 bars (slow decline); horizontal box height 3%-38% with >= 2 support taps within 1.5% and no close < 30% below box floor. Trigger: Break of Structure (BOS) with >= 2.0R.",
-        "Stop-Loss & Profit Target": "Stop: Tap 3 Low - 0.5x ATR(14) (capped 2%-7% below entry). Target: Box Range High."
-      },
-      {
-        "Playbook / Filter": "Playbook 2: 20D Momentum Breakout",
-        "Moving Averages Used": "50-Day EMA & 20-Day EMA",
-        "Entry / Trigger Criteria": "Close >= prior 20-Day High, Price > 50-Day EMA, and time-paced Relative Volume (RVOL) >= 1.25x 20-Day average volume.",
-        "Stop-Loss & Profit Target": "Stop: Max(min(20-EMA, Close - 1.5x ATR14), Close x 0.94). Target: Entry + 2.5R."
-      },
-      {
-        "Playbook / Filter": "Playbook 3: 20-EMA Pullback Swing",
-        "Moving Averages Used": "20-Day EMA & 50-Day EMA",
-        "Entry / Trigger Criteria": "Confirmed uptrend (Price > 50-EMA and 20-EMA > 50-EMA); Low or Close pulls back within 2.2% of 20-EMA and prints a bullish turn bar (Close >= Open or Close > Prev Close).",
-        "Stop-Loss & Profit Target": "Stop: Min(3-Day Low, 20-EMA) - 0.5x ATR14 (max 5% risk). Target: Max(20D High, Entry + 2.4R)."
-      },
-      {
-        "Playbook / Filter": "Playbook 4: Volatility Squeeze Coil",
-        "Moving Averages Used": "20-Day SMA (Bollinger Mid) & 50-Day EMA",
-        "Entry / Trigger Criteria": "Bollinger Band Width (20, 2) compresses within 18% of its 25-day low (volatility squeeze), Price > 50-EMA, and Close >= prior 3-Day High.",
-        "Stop-Loss & Profit Target": "Stop: 3-Day Low - 0.3x ATR14 (max 5% risk). Target: Entry + 2.8R."
-      },
-      {
-        "Playbook / Filter": "Playbook 5: RSI-2 Oversold Bounce",
-        "Moving Averages Used": "200-Day EMA & 20-Day EMA",
-        "Entry / Trigger Criteria": "Long-term uptrend intact (Price >= 96% of 200-EMA) with extreme short-term washout: 2-period Wilder RSI <= 18 or Low touches Lower Bollinger Band (20, 2).",
-        "Stop-Loss & Profit Target": "Stop: Close - 1.5x ATR14 (max 5.5% risk). Target: Max(20-EMA, Entry + 2.0R)."
-      },
-      {
-        "Playbook / Filter": "Playbook 6: High-Vol Gap Ignition",
-        "Moving Averages Used": "50-Day EMA",
-        "Entry / Trigger Criteria": "Day gain >= +3.2% above 50-EMA on time-paced RVOL >= 1.7x 20-Day average volume, closing in the top 45% of the daily candle range.",
-        "Stop-Loss & Profit Target": "Stop: Day Low - 0.2x ATR14 (max 6% risk). Target: Entry + 2.5R."
-      },
-      {
-        "Playbook / Filter": "Playbook 7: Stage 2 Higher Low",
-        "Moving Averages Used": "150-Day SMA, 50-Day EMA, 20-Day EMA, 5/10-Day SMA",
-        "Entry / Trigger Criteria": "Stage 2 Uptrend (Price > 150-SMA + 1.5%, 150-SMA rising vs 20 bars ago, 50-EMA >= 150-SMA); 12-day pullback low > prior 12-to-38 day low (Higher Low); pulls back from 20D high into 20/50-EMA zone and turns up (Close >= Open, Close > Prev Close, or 5-SMA >= 10-SMA).",
-        "Stop-Loss & Profit Target": "Stop: Max(min(12D Low - 0.35x ATR14, 150-SMA), Close x 0.935). Target: Max(20D High x 1.03, Entry + 2.5R)."
-      },
-      {
-        "Playbook / Filter": "Playbook 8: 150-MA Reversal Radar",
-        "Moving Averages Used": "150-Day SMA",
-        "Entry / Trigger Criteria": "Early Stage 2 trend reversal alert: Stock traded below its 150-Day SMA for >= 3 of the last 30 bars and just crossed back above the 150-Day SMA (within 7.5% above 150-SMA). Use for early research to watch for the next Stage 2 Higher Low.",
-        "Stop-Loss & Profit Target": "Stop: 150-SMA - 0.5x ATR14 (max 7% risk). Target: Entry + 2.5R."
-      },
-      {
-        "Playbook / Filter": "Filter: Pure Momentum Leaders",
-        "Moving Averages Used": "20-Day EMA, 50-Day EMA, 200-Day EMA",
-        "Entry / Trigger Criteria": "Price > 20-EMA, 50-EMA, and 200-EMA simultaneously; 63-Day Relative Strength vs S&P 500 >= +2.0% (RS Leader); and 14-Day RSI between 55 and 75.",
-        "Stop-Loss & Profit Target": "Follows active playbook stop or 20-Day EMA trailing stop."
-      }
-    ])
-    st.dataframe(playbook_ref_df, use_container_width=True, hide_index=True)
+    st.subheader("3. Composite Score & 8-Playbook Parameter Reference (Click Any Box for Details)")
+    st.caption("Tap any box below to expand the exact formula, moving averages, volume thresholds, stop-loss rules, and profit targets.")
+
+    with st.expander("Composite Score (0–100) — Data Inputs, Weights & Exact Formula", expanded=False):
+      st.markdown(
+        f"**Master Formula:**\n"
+        f"`Composite Score = int( (Fundamental_Base × {settings['w_fund']}%) + (Technical_Score × {settings['w_tech']}%) + (Momentum_Score × {settings['w_mom']}%) )`\n\n"
+        f"- **1. Fundamental & Institutional Quality Base (`Fundamental_Base` = 80 pts):**\n"
+        f"  - Assigns a baseline 80/100 quality score across curated liquid sector leaders and monitored portfolio constituents (contributes `80 × {settings['w_fund']}% = {80 * settings['w_fund'] / 100:.1f} pts`).\n"
+        f"- **2. Technical Trend Sub-Score (`Technical_Score`, 0 to 100 pts):**\n"
+        f"  - **50-Day EMA Support (+30 pts):** `+30 pts` if `Close > 50-Day EMA` (else `0 pts`).\n"
+        f"  - **14-Day RSI Bullish Zone (+40 pts):** `+40 pts` if `45 <= RSI(14) <= 70` (healthy momentum without extreme overbought exhaustion; else `+10 pts`).\n"
+        f"  - **Time-Paced Relative Volume (+30 pts):** `+30 pts` if intraday time-paced volume `Paced_RVOL >= 1.2x` the 20-day average volume (else `+10 pts`).\n"
+        f"- **3. Momentum & Breakout Sub-Score (`Momentum_Score`, 0 to 100 pts):**\n"
+        f"  - **20-Day Breakout Confirmation (+50 pts):** `+50 pts` if `Close >= prior 20-Day High` on `Paced_RVOL >= 1.25x` (else `+15 pts`).\n"
+        f"  - **52-Week High Proximity (+50 pts):** `+50 pts` if `Close >= 90% of 52-Week High` (`Close / High52 >= 0.90`; else `+20 pts`).\n"
+        f"- **Standout Setup Tie-Breaker:** On the Dashboard hero banner, stocks with an active immediate Buy Trigger (`Priority 0`) receive `+100` ranking priority and S&P 500 Relative Strength Leaders (`63D RS Diff >= +2.0%`) receive `+15` priority."
+      )
+
+    PLAYBOOK_SPECS = [
+      (
+        "Playbook 1: TCT Bottom Box (25+ Bar Accumulation Breakout)",
+        "150-Day SMA & 50-Day EMA context; 1-Hour / 5-Day Swing High for Break of Structure (BOS)",
+        "Stock declined >= 8% from its 130-day peak over at least 25 trading bars (slow decline), then formed a horizontal accumulation box (box height between 3% and 38% of price) with at least 2 support taps (Tap 1 & Tap 2 within 1.5% of each other) and no daily close more than 30% below the box floor. Buy Trigger: Close above the Break of Structure (BOS) level with Reward-to-Risk >= 2.0R.",
+        "Tap 3 Low - 0.5 x ATR(14) (capped between 2% and 7% below entry price).",
+        "Top of the Accumulation Box (Range High)."
+      ),
+      (
+        "Playbook 2: 20D Momentum Breakout",
+        "20-Day EMA & 50-Day EMA",
+        "Price closes at or above the prior 20-day high (High20), holds above the 50-day EMA, and trades on time-paced Relative Volume (RVOL) >= 1.25x the 20-day average volume.",
+        "Max(Min(20-Day EMA, Close - 1.5 x ATR14), Close x 0.94) (maximum 6% stop distance).",
+        "Entry Price + 2.5R (2.5x the dollar risk per share)."
+      ),
+      (
+        "Playbook 3: 20-EMA Pullback Swing",
+        "20-Day EMA & 50-Day EMA",
+        "Established uptrend (Close > 50-Day EMA and 20-Day EMA > 50-Day EMA) where intraday Low or Close pulls back within 2.2% of the rising 20-Day EMA and prints a bullish turn candle (Close >= Open or Close > Previous Close).",
+        "Min(3-Day Low, 20-Day EMA) - 0.5 x ATR14 (capped at 5% maximum risk).",
+        "Max(Prior 20-Day High, Entry Price + 2.4R)."
+      ),
+      (
+        "Playbook 4: Volatility Squeeze Coil",
+        "20-Day SMA (Bollinger Band Middle) & 50-Day EMA",
+        "Bollinger Band Width ((Upper - Lower) / Mid) compresses to within 18% of its 25-day minimum (tight volatility coil) while Price holds above the 50-Day EMA and breaks above the prior 3-day high.",
+        "3-Day Low - 0.3 x ATR14 (capped at 5% maximum risk).",
+        "Entry Price + 2.8R."
+      ),
+      (
+        "Playbook 5: RSI-2 Oversold Bounce",
+        "200-Day EMA & 20-Day EMA",
+        "Long-term uptrend intact (Close >= 96% of 200-Day EMA), combined with an extreme short-term washout where 2-period Wilder RSI (RSI-2) drops to <= 18 or intraday Low touches the Lower Bollinger Band (20, 2).",
+        "Close - 1.5 x ATR14 (capped at 5.5% maximum risk).",
+        "Max(20-Day EMA mean reversion, Entry Price + 2.0R)."
+      ),
+      (
+        "Playbook 6: High-Vol Gap Ignition",
+        "50-Day EMA",
+        "Stock gains >= +3.2% on the day above its 50-Day EMA on time-paced RVOL >= 1.7x the 20-day average volume, closing in the top 45% of the day's high-low range.",
+        "Day Low - 0.2 x ATR14 (capped at 6% maximum risk).",
+        "Entry Price + 2.5R."
+      ),
+      (
+        "Playbook 7: Stage 2 Higher Low (Pullback Bounce)",
+        "150-Day SMA, 50-Day EMA, 20-Day EMA, and 5/10-Day SMA",
+        "Confirmed Stage 2 Uptrend (Close > 150-Day SMA + 1.5%, 150-Day SMA is rising vs. 20 bars ago, and 50-Day EMA >= 150-Day SMA); recent 12-day pullback low is higher than the prior 12-to-38 day low (Higher Low intact); pulls back from 20D high into the rising 20/50-EMA support zone and turns up (Close >= Open, Close > Prev Close, or 5-SMA >= 10-SMA).",
+        "Max(Min(12-Day Pullback Low - 0.35 x ATR14, 150-Day SMA), Close x 0.935).",
+        "Max(20-Day High x 1.03, Entry Price + 2.5R)."
+      ),
+      (
+        "Playbook 8: 150-MA Reversal Radar (Early Research)",
+        "150-Day SMA",
+        "Stock traded below its 150-Day SMA for at least 3 of the last 30 sessions and just crossed back above the 150-Day SMA (trading within 7.5% above the 150-Day SMA). Flags early Stage 1-to-Stage 2 transitions to research for the next Higher Low.",
+        "150-Day SMA - 0.5 x ATR14 (capped at 7% maximum risk).",
+        "Entry Price + 2.5R."
+      ),
+      (
+        "Filter: Pure Momentum Leaders",
+        "20-Day EMA, 50-Day EMA, and 200-Day EMA",
+        "Price > 20-Day EMA, 50-Day EMA, and 200-Day EMA simultaneously; 63-day return outperforms the S&P 500 by >= +2.0% (Relative Strength Leader); and 14-day RSI is between 55 and 75.",
+        "Uses active playbook stop-loss or 20-Day EMA trailing stop.",
+        "Uses active playbook target or trails the 20-Day EMA."
+      )
+    ]
+
+    pb_col1, pb_col2 = st.columns(2)
+    for idx_pb, (pb_title, pb_mas, pb_trig, pb_stop, pb_tgt) in enumerate(PLAYBOOK_SPECS):
+      with (pb_col1 if idx_pb % 2 == 0 else pb_col2):
+        with st.expander(pb_title, expanded=False):
+          st.markdown(
+            f"- **Moving Averages Used:** {pb_mas}\n"
+            f"- **Entry / Trigger Criteria:** {pb_trig}\n"
+            f"- **Stop-Loss Rule:** `{pb_stop}`\n"
+            f"- **Profit Target Rule:** `{pb_tgt}`"
+          )
