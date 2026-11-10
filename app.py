@@ -17,20 +17,38 @@ import email.utils
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 from concurrent.futures import ThreadPoolExecutor
+try:
+  st.set_option("client.toolbarMode", "minimal")
+except Exception:
+  pass
+
 st.set_page_config(
   page_title="Quality Momentum & TCT Cockpit",
-  page_icon="📈",
   layout="wide",
   initial_sidebar_state="expanded"
 )
 
-# --- NTFY ALERT ENGINE & PERSISTENT STORAGE FILES ---
-STATE_FILE = "alert_state.json"
-DATA_FILE = "watchlists.json"
-POSITIONS_FILE = "positions.json"
-LEDGER_FILE = "trade_ledger.json"
-SETTINGS_FILE = "settings.json"
-UI_STATE_FILE = "ui_state.json"
+# --- SILENT MULTI-USER URL ROUTING (?user=name) & PERSISTENT FILES ---
+if "active_user" not in st.session_state:
+  st.session_state["active_user"] = ""
+
+raw_user_q = st.query_params.get("user", "")
+if raw_user_q:
+  clean_u = "".join(c for c in str(raw_user_q).strip().lower() if c.isalnum() or c in ("_", "-"))
+  if clean_u:
+    st.session_state["active_user"] = clean_u
+
+ACTIVE_USER = st.session_state.get("active_user", "")
+if ACTIVE_USER and st.query_params.get("user") != ACTIVE_USER:
+  st.query_params["user"] = ACTIVE_USER
+
+USER_SUFFIX = f"_{ACTIVE_USER}" if ACTIVE_USER else ""
+STATE_FILE = f"alert_state{USER_SUFFIX}.json"
+DATA_FILE = f"watchlists{USER_SUFFIX}.json"
+POSITIONS_FILE = f"positions{USER_SUFFIX}.json"
+LEDGER_FILE = f"trade_ledger{USER_SUFFIX}.json"
+SETTINGS_FILE = f"settings{USER_SUFFIX}.json"
+UI_STATE_FILE = f"ui_state{USER_SUFFIX}.json"
 GITHUB_REPO = "lingpesos-web/quality-momentum"
 GITHUB_BRANCH = "main"
 
@@ -91,25 +109,30 @@ def persist_ui_state():
     "screener_title": st.session_state.get("screener_title", None)
   })
 
+def _reset_transient_query_params():
+  st.query_params.clear()
+  if ACTIVE_USER:
+    st.query_params["user"] = ACTIVE_USER
+
 if "inspect" in st.query_params:
   clicked_sym = st.query_params.get("inspect", "").strip().upper()
   if clicked_sym:
     st.session_state.inspect_symbol = clicked_sym
-  st.query_params.clear()
+  _reset_transient_query_params()
 
 if "rt_chart" in st.query_params:
   rt_sym = st.query_params.get("rt_chart", "").strip().upper()
   if rt_sym:
     st.session_state.rt_chart_symbol = rt_sym
     st.session_state.inspect_symbol = None
-    st.session_state.nav_radio = "⚡ Live Real-Time Quotes"
+    st.session_state.nav_radio = "Live Real-Time Quotes"
     persist_ui_state()
-  st.query_params.clear()
+  _reset_transient_query_params()
 
 def clear_inspection():
   st.session_state.inspect_symbol = None
   if "inspect" in st.query_params or "rt_chart" in st.query_params:
-    st.query_params.clear()
+    _reset_transient_query_params()
   persist_ui_state()
 
 def send_ntfy_alert(message, title="Daily Portfolio Briefing"):
@@ -134,7 +157,7 @@ def send_ntfy_alert(message, title="Daily Portfolio Briefing"):
 st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,600;1,6..72,400&family=Inter:wght@400;500;600;700;800&display=swap');.stApp{background-color:#fbf9f4 !important;color:#1a1a1a !important;font-family:'Inter', sans-serif;}[data-testid="stSidebar"]{background-color:#0f291e !important;border-right:1px solid #1c3d2f;}[data-testid="stSidebar"] *{color:#e2e8f0 !important;}[data-testid="stSidebar"] .stRadio div[role="radiogroup"] > label{padding:8px 12px;border-radius:6px;margin-bottom:4px;transition:all 0.2s;}[data-testid="stSidebar"] .stRadio div[role="radiogroup"] > label:hover{background-color:#183d2e;}h1, h2, h3{font-family:'Newsreader', Georgia, serif !important;font-weight:600 !important;color:#0f291e !important;}.macro-container{display:flex;flex-wrap:nowrap;gap:8px;overflow-x:auto;padding-bottom:8px;margin-bottom:12px;}.macro-card{flex:1 1 0px;min-width:105px;background:#ffffff;border:1px solid #e7e2d9;border-radius:8px;padding:8px 6px;text-align:center;box-shadow:0 1px 2px rgba(0,0,0,0.02);}.macro-title{font-size:0.68rem;color:#71717a;text-transform:uppercase;font-weight:700;letter-spacing:0.04em;white-space:nowrap;}.macro-price{font-size:0.88rem;font-weight:700;color:#18181b;margin:2px 0;white-space:nowrap;}.tick-pos{color:#15803d;font-size:0.72rem;font-weight:600;white-space:nowrap;}.tick-neg{color:#b91c1c;font-size:0.72rem;font-weight:600;white-space:nowrap;}.stock-card{background:#ffffff;border:1px solid #e7e2d9;border-radius:10px;padding:16px;margin-bottom:14px;box-shadow:0 1px 4px rgba(0,0,0,0.03);}.ticker-link{font-size:1.25rem;font-weight:700;color:#0f291e !important;text-decoration:none !important;border-bottom:2px solid #c5a059;padding-bottom:1px;}.ticker-link:hover{color:#15803d !important;border-bottom-color:#15803d;background-color:#f0fdf4;border-radius:4px;padding:2px 6px;}.hero-ticker-link{font-size:1.85rem;font-weight:700;color:#ffffff !important;text-decoration:none !important;border-bottom:2px dashed #c5a059;padding-bottom:2px;}.badge{display:inline-block;padding:2px 8px;border-radius:4px;font-size:0.68rem;font-weight:600;text-transform:uppercase;}.badge-breakout{background:#dcfce7;color:#15803d;}.badge-trend{background:#dbeafe;color:#1d4ed8;}.badge-candidate{background:#fef9c3;color:#a16207;}.badge-caution{background:#fee2e2;color:#b91c1c;}.badge-tct-buy{background:#15803d;color:#ffffff;}.badge-tct-watch{background:#fef08a;color:#854d0e;border:1px solid #fde047;}.badge-tct-sell{background:#b91c1c;color:#ffffff;}.badge-rs-lead{background:#ecfdf5;color:#047857;border:1px solid #a7f3d0;}.badge-rs-lag{background:#f4f4f5;color:#71717a;}.badge-earn-warn{background:#ffedd5;color:#c2410c;border:1px solid #fdba74;font-weight:700;}.pill{display:inline-flex;align-items:center;background:#e9e4db;color:#0f291e !important;text-decoration:none !important;padding:4px 10px;border-radius:14px;font-size:0.8rem;font-weight:600;margin-right:6px;margin-bottom:6px;}.pill:hover{background:#d6cfc2;}.scroll-news-box{max-height:540px;overflow-y:auto;padding-right:6px;}.ticker-news-badge{background:#dcfce7;color:#15803d;padding:2px 6px;border-radius:4px;font-weight:700;font-size:0.7rem;margin-right:6px;}.age-badge{background:#f1f5f9;color:#334155;padding:2px 6px;border-radius:4px;font-weight:600;font-size:0.68rem;margin-left:6px;}.trade-ticket{background:#f8f6f0;border:1px solid #e2ddd2;border-radius:8px;padding:10px 12px;margin-top:10px;font-size:0.80rem;}/* LARGE-FONT 2-COLUMN LIVE WATCHBOARD TABLE */
-.live-board-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;width:100%;margin-top:4px;}@media (max-width:900px){.live-board-grid{grid-template-columns:1fr;}}.live-quote-table{width:100%;border-collapse:collapse;background:#ffffff;border:1px solid #d4cec3;border-radius:6px;overflow:hidden;font-size:1.12rem;table-layout:auto;}.live-quote-table thead th{background:#0f291e;color:#f4efe6;font-weight:700;font-size:0.82rem;text-transform:uppercase;letter-spacing:0.02em;padding:6px 5px;text-align:right;white-space:nowrap;}.live-quote-table thead th:nth-child(1), .live-quote-table thead th:nth-child(2){text-align:left;}.live-quote-table tbody tr{border-bottom:1px solid #eae5dc;line-height:1.25;}.live-quote-table tbody tr:nth-child(even){background-color:#faf8f5;}.live-quote-table tbody tr:hover{background-color:#ecfdf5;}.live-quote-table td{padding:5px 5px;text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums;}.live-quote-table td:nth-child(1){text-align:left;font-size:0.92rem;font-weight:700;padding-left:6px;padding-right:4px;}.live-quote-table td:nth-child(2){text-align:left;font-weight:800;padding-left:4px;padding-right:4px;}.rt-sym-link{color:#0f291e !important;text-decoration:none !important;font-weight:800;font-size:1.18rem;border-bottom:2px solid #c5a059;}.rt-sym-link:hover{color:#15803d !important;background:#dcfce7;padding:1px 4px;border-radius:3px;}.rt-dossier-link{text-decoration:none !important;font-size:0.85rem;margin-left:3px;opacity:0.7;}</style>
+.live-board-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;width:100%;margin-top:4px;}@media (max-width:900px){.live-board-grid{grid-template-columns:1fr;}}.live-quote-table{width:100%;border-collapse:collapse;background:#ffffff;border:1px solid #d4cec3;border-radius:6px;overflow:hidden;font-size:1.12rem;table-layout:auto;}.live-quote-table thead th{background:#0f291e;color:#f4efe6;font-weight:700;font-size:0.82rem;text-transform:uppercase;letter-spacing:0.02em;padding:6px 5px;text-align:right;white-space:nowrap;}.live-quote-table thead th:nth-child(1), .live-quote-table thead th:nth-child(2){text-align:left;}.live-quote-table tbody tr{border-bottom:1px solid #eae5dc;line-height:1.25;}.live-quote-table tbody tr:nth-child(even){background-color:#faf8f5;}.live-quote-table tbody tr:hover{background-color:#ecfdf5;}.live-quote-table td{padding:5px 5px;text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums;}.live-quote-table td:nth-child(1){text-align:left;font-size:0.92rem;font-weight:700;padding-left:6px;padding-right:4px;}.live-quote-table td:nth-child(2){text-align:left;font-weight:800;padding-left:4px;padding-right:4px;}.rt-sym-link{color:#0f291e !important;text-decoration:none !important;font-weight:800;font-size:1.18rem;border-bottom:2px solid #c5a059;}.rt-sym-link:hover{color:#15803d !important;background:#dcfce7;padding:1px 4px;border-radius:3px;}.rt-dossier-link{text-decoration:none !important;font-size:0.75rem;margin-left:5px;color:#0f291e !important;font-weight:700;opacity:0.75;}[data-testid="stToolbarActions"],[data-testid="stActionButtonIcon"],[data-testid="stHeaderActionElements"],[data-testid="manage-app-button"],[data-testid="stMainMenu"],.stDeployButton,.stAppDeployButton,header a[href*="github.com"],div[class*="viewerBadge"],a[class*="viewerBadge"],div[class*="StatusWidget"]{display:none !important;visibility:hidden !important;}</style>
 """, unsafe_allow_html=True)
 
 # --- WATCHLISTS & GITHUB AUTO-SYNC ---
@@ -182,7 +205,7 @@ def sync_file_to_github(data, filename):
     req_put = urllib.request.Request(api_url, data=json.dumps(payload).encode("utf-8"), headers={**headers, "Content-Type": "application/json"}, method="PUT")
     with urllib.request.urlopen(req_put, timeout=8) as resp:
       if resp.status in (200, 201):
-        return True, f"✅ Permanently synced to GitHub {filename}!"
+        return True, f"Permanently synced to GitHub {filename}!"
   except Exception as e:
     return False, f"Saved locally (GitHub sync error: {str(e)[:60]})"
   return False, "Saved locally."
@@ -518,62 +541,62 @@ def analyze_six_playbooks(df, account_size=100000, spy_ret_63d=0.0, df_1h=None):
   is_gap_ignition = ((curr_close - prev_close) / prev_close >= 0.032) and (paced_rvol >= 1.7) and ((curr_close - low_arr[-1]) / day_rng >= 0.55) and (curr_close > ema50)
   playbook_cat = "TREND"
   if tct_valid_range and range_high and bos_level and tap3_price:
-    playbook_name = "📐 Playbook 1: TCT Bottom Box"
+    playbook_name = "Playbook 1: TCT Bottom Box"
     playbook_cat = "TCT"
     entry_ref = curr_close if curr_close >= bos_level else bos_level
     effective_stop = max(min(tap3_price - (0.5 * atr14_1h_est), entry_ref * 0.98), entry_ref * 0.93)
     target_price = range_high
   elif is_stage2_higher_low:
-    playbook_name = "📈 Playbook 7: Stage 2 Higher Low"
+    playbook_name = "Playbook 7: Stage 2 Higher Low"
     playbook_cat = "STAGE2_HL"
     bos_level = max(float(high_arr[-2]), curr_close) if curr_close < prev_close else curr_close
     entry_ref = curr_close
     effective_stop = max(min(recent_pb_low - 0.35 * atr14_daily, sma150), curr_close * 0.935)
     target_price = max(high_20d_curr * 1.03, entry_ref + 2.5 * (entry_ref - effective_stop))
   elif is_150ma_reversal_radar:
-    playbook_name = "🔔 Playbook 8: 150-MA Reversal Radar"
+    playbook_name = "Playbook 8: 150-MA Reversal Radar"
     playbook_cat = "REVERSAL_150"
     bos_level = high_5d_prev if curr_close < high_5d_prev else curr_close
     entry_ref = curr_close
     effective_stop = max(sma150 - 0.5 * atr14_daily, curr_close * 0.93)
     target_price = entry_ref + 2.5 * (entry_ref - effective_stop)
   elif is_20d_breakout:
-    playbook_name = "🚀 Playbook 2: 20D Momentum Breakout"
+    playbook_name = "Playbook 2: 20D Momentum Breakout"
     playbook_cat = "BREAKOUT"
     bos_level = high_20d_prev
     entry_ref = curr_close
     effective_stop = max(min(ema20, curr_close - 1.5 * atr14_daily), curr_close * 0.94)
     target_price = entry_ref + 2.5 * (entry_ref - effective_stop)
   elif is_gap_ignition:
-    playbook_name = "🔥 Playbook 6: High-Vol Gap Ignition"
+    playbook_name = "Playbook 6: High-Vol Gap Ignition"
     playbook_cat = "BREAKOUT"
     bos_level = float(high_arr[-1]) if curr_close < high_arr[-1] else curr_close
     entry_ref = curr_close
     effective_stop = max(float(low_arr[-1]) - 0.2 * atr14_daily, curr_close * 0.94)
     target_price = entry_ref + 2.5 * (entry_ref - effective_stop)
   elif is_squeeze_breakout:
-    playbook_name = "⚡ Playbook 4: Volatility Squeeze Coil"
+    playbook_name = "Playbook 4: Volatility Squeeze Coil"
     playbook_cat = "SWING_PULLBACK"
     bos_level = high_3d_prev
     entry_ref = curr_close
     effective_stop = max(low_3d - 0.3 * atr14_daily, curr_close * 0.95)
     target_price = entry_ref + 2.8 * (entry_ref - effective_stop)
   elif is_holy_grail_pullback:
-    playbook_name = "🎯 Playbook 3: 20-EMA Pullback Swing"
+    playbook_name = "Playbook 3: 20-EMA Pullback Swing"
     playbook_cat = "SWING_PULLBACK"
     bos_level = max(float(high_arr[-2]), curr_close) if curr_close < prev_close else curr_close
     entry_ref = curr_close
     effective_stop = max(min(low_3d, ema20) - 0.5 * atr14_daily, curr_close * 0.95)
     target_price = max(high_20d_prev, entry_ref + 2.4 * (entry_ref - effective_stop))
   elif is_rsi2_snapback:
-    playbook_name = f"🪃 Playbook 5: RSI-2 Oversold Bounce (RSI2={rsi2:.0f})"
+    playbook_name = f"Playbook 5: RSI-2 Oversold Bounce (RSI2={rsi2:.0f})"
     playbook_cat = "OVERSOLD"
     bos_level = curr_close
     entry_ref = curr_close
     effective_stop = max(curr_close - 1.5 * atr14_daily, curr_close * 0.945)
     target_price = max(ema20, entry_ref + 2.0 * (entry_ref - effective_stop))
   else:
-    playbook_name = "📈 Standard Trend Swing"
+    playbook_name = "Standard Trend Swing"
     bos_level = curr_close if curr_close >= high_5d_prev else high_5d_prev
     entry_ref = curr_close if curr_close >= bos_level else bos_level
     effective_stop = max(min(entry_ref - 1.5 * atr14_daily, entry_ref * 0.978), entry_ref * 0.935)
@@ -587,40 +610,40 @@ def analyze_six_playbooks(df, account_size=100000, spy_ret_63d=0.0, df_1h=None):
   stop_loss_pct = ((effective_stop - entry_ref) / entry_ref) * 100.0
   crossed_5d = (curr_close >= high_5d_prev) and (prev_close < high_5d_prev)
   if tct_valid_range and curr_close >= bos_level and r_multiple >= 1.9:
-    act, badge, dot, short_s, prio = "BUY NOW (TCT BOS)", "badge-tct-buy", "🟢", "🟢 Buy Now", 0
+    act, badge, dot, short_s, prio = "BUY NOW (TCT BOS)", "badge-tct-buy", "[BUY]", "Buy Now", 0
     expl = f"TCT accumulation breakout above BOS (${bos_level:,.2f}) targeting Range High (${target_price:,.2f})."
   elif is_stage2_higher_low:
-    act, badge, dot, short_s, prio = "STAGE 2 HIGHER LOW", "badge-tct-buy", "📈", "📈 Stage 2 HL", 0
+    act, badge, dot, short_s, prio = "STAGE 2 HIGHER LOW", "badge-tct-buy", "[S2]", "Stage 2 HL", 0
     expl = f"Stage 2 Higher Low: Uptrend above rising 150-MA (${sma150:,.2f}), Higher Low at ${recent_pb_low:,.2f} > prior low (${prior_pb_low:,.2f})."
   elif is_20d_breakout or is_gap_ignition:
-    act, badge, dot, short_s, prio = "BUY NOW (BREAKOUT)", "badge-tct-buy", "🟢", "🟢 Buy Now", 0
+    act, badge, dot, short_s, prio = "BUY NOW (BREAKOUT)", "badge-tct-buy", "[BUY]", "Buy Now", 0
     expl = f"{playbook_name}: Breakout above ${bos_level:,.2f} on {paced_rvol:.1f}x pace volume."
   elif is_squeeze_breakout or is_holy_grail_pullback:
-    act, badge, dot, short_s, prio = "SWING BUY (PULLBACK/COIL)", "badge-tct-buy", "🎯", "🎯 Swing Buy", 0
+    act, badge, dot, short_s, prio = "SWING BUY (PULLBACK/COIL)", "badge-tct-buy", "[SWG]", "Swing Buy", 0
     expl = f"{playbook_name}: High-probability swing entry near ${entry_ref:,.2f}, stop ${effective_stop:,.2f}."
   elif is_150ma_reversal_radar:
-    act, badge, dot, short_s, prio = "🔔 150-MA REVERSAL (RESEARCH)", "badge-tct-watch", "🔔", "🔔 150MA Radar", 1
+    act, badge, dot, short_s, prio = "150-MA REVERSAL (RESEARCH)", "badge-tct-watch", "[150]", "150MA Radar", 1
     expl = f"Reclaimed 150-Day MA (${sma150:,.2f}). Early trend reversal radar — monitor for Stage 2 Higher Low."
   elif is_rsi2_snapback:
-    act, badge, dot, short_s, prio = "SWING BUY (OVERSOLD)", "badge-tct-watch", "🪃", "🪃 Oversold", 1
+    act, badge, dot, short_s, prio = "SWING BUY (OVERSOLD)", "badge-tct-watch", "[OVR]", "Oversold", 1
     expl = f"RSI-2 extreme oversold ({rsi2:.0f}) above 200-EMA. Target bounce to ${target_price:,.2f}."
   elif tct_valid_range and curr_close < bos_level:
-    act, badge, dot, short_s, prio = "WATCHING TCT BOX", "badge-tct-watch", "📐", "📐 TCT Box", 1
+    act, badge, dot, short_s, prio = "WATCHING TCT BOX", "badge-tct-watch", "[TCT]", "TCT Box", 1
     expl = f"Valid 25+ bar TCT bottom box formed. Buy if price closes above BOS ${bos_level:,.2f}."
   elif is_pure_momentum:
-    act, badge, dot, short_s, prio = "🔥 MOMENTUM LEADER", "badge-rs-lead", "🔥", "🔥 Momentum", 2
+    act, badge, dot, short_s, prio = "MOMENTUM LEADER", "badge-rs-lead", "[MOM]", "Momentum", 2
     expl = f"Strong institutional momentum leader (RS+, Price>20/50/200 EMA). Trailing stop ${effective_stop:,.2f}."
   elif curr_close > ema50 and (curr_close >= ema20 * 0.99 or crossed_5d):
-    act, badge, dot, short_s, prio = "HOLD / BUY DIP", "badge-trend", "🔵", "🔵 Uptrend", 2
+    act, badge, dot, short_s, prio = "HOLD / BUY DIP", "badge-trend", "[UP]", "Uptrend", 2
     expl = f"Strong uptrend above 20 & 50 EMA. Swing target ${target_price:,.2f}, stop ${effective_stop:,.2f}."
   elif below_sma150 and not tct_valid_range and not is_rsi2_snapback:
-    act, badge, dot, short_s, prio = "BROKE 150-MA (CUT LOSS)", "badge-tct-sell", "🔴", "🔴 Below 150MA", 4
+    act, badge, dot, short_s, prio = "BROKE 150-MA (CUT LOSS)", "badge-tct-sell", "[CUT]", "Below 150MA", 4
     expl = f"Stage 4 Warning: Below 150-day MA (${sma150:,.2f}). Cut loss / avoid until price reclaims 150-MA."
   elif curr_close < ema50 and not tct_valid_range and not is_rsi2_snapback:
-    act, badge, dot, short_s, prio = "SELL / AVOID", "badge-tct-sell", "🔴", "🔴 Below 50", 4
+    act, badge, dot, short_s, prio = "SELL / AVOID", "badge-tct-sell", "[AVD]", "Below 50MA", 4
     expl = f"Below 50-day EMA (${ema50:,.2f}) without a valid TCT bottom box. Protect capital."
   else:
-    act, badge, dot, short_s, prio = "WAIT FOR TRIGGER", "badge-candidate", "🟡", "🟡 Wait", 3
+    act, badge, dot, short_s, prio = "WAIT FOR TRIGGER", "badge-candidate", "[WAIT]", "Wait", 3
     expl = f"Consolidating. Wait for a clean move above ${bos_level:,.2f} before entering."
   return {
     "TCT_Valid_Range": tct_valid_range, "TCT_Model": playbook_name, "Playbook_Cat": playbook_cat,
@@ -658,15 +681,20 @@ def check_and_fire_active_position_alerts(records):
       ema20 = d["EMA20_Val"]
       pos_id = pos["id"]
       if live_price <= stop_price and f"{pos_id}_STOP" not in alerted:
-        lines.append(f"🚨 STOP HIT: {sym} dropped to ${live_price:,.2f} (Stop was ${stop_price:,.2f})")
+        lines.append(f"STOP HIT: {sym} dropped to ${live_price:,.2f} (Stop was ${stop_price:,.2f})")
         alerted.add(f"{pos_id}_STOP")
       if live_price >= target15 and not pos.get("HalfSold", False) and f"{pos_id}_TGT15" not in alerted:
-        lines.append(f"💰 +15% GAIN: {sym} reached ${live_price:,.2f}! Sell 50% ({int(pos['Shares']*0.5)} shs) and raise stop.")
+        lines.append(f"+15% GAIN: {sym} reached ${live_price:,.2f}! Sell 50% ({int(pos['Shares']*0.5)} shs) and raise stop.")
         alerted.add(f"{pos_id}_TGT15")
       if live_price < ema20 and d["Change"] < 0 and f"{pos_id}_EMA20" not in alerted:
-        lines.append(f"⚠️ BROKE 20-EMA: {sym} dropped to ${live_price:,.2f} (EMA20: ${ema20:,.2f}). Trailing Exit Triggered.")
+        lines.append(f"BROKE 20-EMA: {sym} dropped to ${live_price:,.2f} (EMA20: ${ema20:,.2f}). Trailing Exit Triggered.")
         alerted.add(f"{pos_id}_EMA20")
     if lines:
+      for ln in lines:
+        try:
+          st.toast(ln)
+        except Exception:
+          pass
       send_ntfy_alert("\n".join(lines), "Active Position Rule Alert")
       state["alerted"] = sorted(list(alerted))
       save_json(STATE_FILE, state)
@@ -702,13 +730,18 @@ def check_and_fire_live_ntfy(records):
     if new_buys or new_reversals or new_targets or new_stops:
       lines = []
       if new_buys:
-        lines.append("🟢 INSTANT BUY / STAGE 2 HL: " + ", ".join(new_buys[:6]))
+        lines.append("INSTANT BUY / STAGE 2 HL: " + ", ".join(new_buys[:6]))
       if new_reversals:
-        lines.append("🔔 150-MA REVERSAL RADAR (RESEARCH): " + ", ".join(new_reversals[:6]))
+        lines.append("150-MA REVERSAL RADAR (RESEARCH): " + ", ".join(new_reversals[:6]))
       if new_targets:
-        lines.append("🎯 TAKE PROFIT HIT: " + ", ".join(new_targets[:6]))
+        lines.append("TAKE PROFIT HIT: " + ", ".join(new_targets[:6]))
       if new_stops:
-        lines.append("🔴 STOP-LOSS TRIGGERED: " + ", ".join(new_stops[:6]))
+        lines.append("STOP-LOSS TRIGGERED: " + ", ".join(new_stops[:6]))
+      for ln in lines:
+        try:
+          st.toast(ln)
+        except Exception:
+          pass
       send_ntfy_alert("\n".join(lines), "Live Intraday Trigger Alert")
       state["alerted"] = sorted(list(alerted))
       save_json(STATE_FILE, state)
@@ -738,9 +771,9 @@ def fetch_batch_market_data(tickers, account_size=100000, refresh_bucket=0):
     data = yf.download(download_list, period="1y", interval="1d", group_by="ticker", progress=False)
     now_utc = datetime.now(timezone.utc)
     data_intraday = None
-    if now_utc.hour in (0, 1):
+    if now_utc.hour in (20, 21, 22, 23, 0, 1, 2, 3, 4, 5, 6):
       try:
-        data_intraday = yf.download(clean_tickers[:45], period="5d", interval="15m", group_by="ticker", progress=False)
+        data_intraday = yf.download(clean_tickers[:60], period="5d", interval="15m", group_by="ticker", progress=False)
       except Exception:
         data_intraday = None
   except Exception:
@@ -762,19 +795,24 @@ def fetch_batch_market_data(tickers, account_size=100000, refresh_bucket=0):
         continue
       if data_intraday is not None:
         try:
-          df_intra = _extract_ticker_df(data_intraday, t, len(clean_tickers[:45])).dropna(subset=["Close"])
+          df_intra = _extract_ticker_df(data_intraday, t, len(clean_tickers[:60])).dropna(subset=["Close"])
           if not df_intra.empty:
             intra_dates = pd.to_datetime(df_intra.index).tz_localize(None).normalize()
             last_intra_date = intra_dates[-1]
             last_1d_date = pd.to_datetime(df.index[-1]).tz_localize(None).normalize()
-            if last_intra_date > last_1d_date:
-              ts = df_intra[intra_dates == last_intra_date]
-              new_r = pd.DataFrame({
-                "Open": [float(ts["Open"].iloc[0])], "High": [float(ts["High"].max())],
-                "Low": [float(ts["Low"].min())], "Close": [float(ts["Close"].iloc[-1])],
-                "Volume": [float(ts["Volume"].sum())]
-              }, index=[last_intra_date])
-              df = pd.concat([df, new_r])
+            ts = df_intra[intra_dates == last_intra_date]
+            if not ts.empty:
+              if last_intra_date > last_1d_date:
+                new_r = pd.DataFrame({
+                  "Open": [float(ts["Open"].iloc[0])], "High": [float(ts["High"].max())],
+                  "Low": [float(ts["Low"].min())], "Close": [float(ts["Close"].iloc[-1])],
+                  "Volume": [float(ts["Volume"].sum())]
+                }, index=[last_intra_date])
+                df = pd.concat([df, new_r])
+              elif last_intra_date == last_1d_date:
+                df.iloc[-1, df.columns.get_loc("Close")] = float(ts["Close"].iloc[-1])
+                df.iloc[-1, df.columns.get_loc("High")] = max(float(df["High"].iloc[-1]), float(ts["High"].max()))
+                df.iloc[-1, df.columns.get_loc("Low")] = min(float(df["Low"].iloc[-1]), float(ts["Low"].min()))
         except Exception:
           pass
       close = float(df["Close"].iloc[-1])
@@ -977,11 +1015,11 @@ def render_watchlist_reorder_panel(folder_name, key_prefix="wl"):
   st.markdown('<div style="background:#ffffff;border:1px solid #dcd6cb;border-radius:8px;padding:12px 16px;margin-bottom:12px;">', unsafe_allow_html=True)
   c_top1, c_top2, c_top3 = st.columns([2.2, 2.2, 1.6])
   with c_top1:
-    st.markdown(f"**✏️ Editing Watchlist: `{folder_name}`**")
-    st.caption("Tap ⏫ (Top), ⬆️ (Up), ⬇️ (Down), or 🗑️ (Delete) to arrange your exact order.")
+    st.markdown(f"**Editing Watchlist: `{folder_name}`**")
+    st.caption("Tap Top, Up, Dn, or Del to arrange your exact order.")
   with c_top2:
     new_list_name = st.text_input("Create New Watchlist Folder", placeholder="e.g. AI & Semis", key=f"{key_prefix}_new_folder_in", label_visibility="collapsed")
-    if st.button("➕ Create New Watchlist", key=f"{key_prefix}_btn_new_folder") and new_list_name.strip():
+    if st.button("Create New Watchlist", key=f"{key_prefix}_btn_new_folder") and new_list_name.strip():
       clean_name = new_list_name.strip()
       if clean_name not in watchlists:
         watchlists[clean_name] = []
@@ -989,7 +1027,7 @@ def render_watchlist_reorder_panel(folder_name, key_prefix="wl"):
         st.toast(msg)
         st.rerun()
   with c_top3:
-    if st.button("💾 Save & Sync Order to GitHub", type="primary", use_container_width=True, key=f"{key_prefix}_sync_gh"):
+    if st.button("Save & Sync Order to GitHub", type="primary", use_container_width=True, key=f"{key_prefix}_sync_gh"):
       ok, msg = sync_file_to_github(watchlists, DATA_FILE)
       st.success(msg) if ok else st.warning(msg)
   syms = watchlists.get(folder_name, [])
@@ -1002,13 +1040,13 @@ def render_watchlist_reorder_panel(folder_name, key_prefix="wl"):
       with (e_col1 if i < half else e_col2):
         r1, r2, r3, r4, r5 = st.columns([2.4, 1, 1, 1, 1])
         r1.markdown(f"**{i+1}. {s}**")
-        if r2.button("⏫", key=f"{key_prefix}_top_{folder_name}_{s}_{i}", disabled=(i == 0)):
+        if r2.button("Top", key=f"{key_prefix}_top_{folder_name}_{s}_{i}", disabled=(i == 0)):
           syms.pop(i); syms.insert(0, s); save_json(DATA_FILE, watchlists); st.rerun()
-        if r3.button("⬆️", key=f"{key_prefix}_up_{folder_name}_{s}_{i}", disabled=(i == 0)):
+        if r3.button("Up", key=f"{key_prefix}_up_{folder_name}_{s}_{i}", disabled=(i == 0)):
           syms[i - 1], syms[i] = syms[i], syms[i - 1]; save_json(DATA_FILE, watchlists); st.rerun()
-        if r4.button("⬇️", key=f"{key_prefix}_dn_{folder_name}_{s}_{i}", disabled=(i == len(syms) - 1)):
+        if r4.button("Dn", key=f"{key_prefix}_dn_{folder_name}_{s}_{i}", disabled=(i == len(syms) - 1)):
           syms[i + 1], syms[i] = syms[i], syms[i + 1]; save_json(DATA_FILE, watchlists); st.rerun()
-        if r5.button("🗑️", key=f"{key_prefix}_del_{folder_name}_{s}_{i}"):
+        if r5.button("Del", key=f"{key_prefix}_del_{folder_name}_{s}_{i}"):
           syms.pop(i); sync_file_to_github(watchlists, DATA_FILE); st.rerun()
   st.markdown('</div>', unsafe_allow_html=True)
 
@@ -1030,7 +1068,7 @@ def log_ledger_entry(action_type, ticker, shares, buy_price, sell_price, pnl_dol
   sync_file_to_github(trade_ledger, LEDGER_FILE)
 
 def render_active_positions_manager(key_prefix="ap"):
-  st.markdown("<h1>💼 Active Portfolio & Trade Ledger</h1>", unsafe_allow_html=True)
+  st.markdown("<h1>Active Portfolio & Trade Ledger</h1>", unsafe_allow_html=True)
   pos_syms = [p["Ticker"] for p in positions]
   data_dict = fetch_batch_market_data(pos_syms, account_size=settings["account_size"]) if pos_syms else {}
   tot_invested = sum(p["Shares"] * p["BuyPrice"] for p in positions)
@@ -1047,7 +1085,7 @@ def render_active_positions_manager(key_prefix="ap"):
   m3.metric("Today's Daily Gain/Loss", f"${daily_pnl:+,.2f}", f"{daily_pct:+.2f}%")
   m4.metric("Unrealized P&L", f"${unreal_pnl:+,.2f}", f"{unreal_pct:+.2f}%")
   m5.metric("Closed Realized P&L", f"${realized_total:+,.2f}")
-  with st.expander("➕ Log a New Position (With Remarks / Trade Thesis)", expanded=not bool(positions)):
+  with st.expander("Log a New Position (With Remarks / Trade Thesis)", expanded=not bool(positions)):
     c_in1, c_in2, c_in3, c_in4, c_in5 = st.columns([1.2, 1.2, 1.1, 1.3, 1.2])
     new_pos_sym = c_in1.text_input("Ticker", placeholder="e.g. NVDA", key=f"{key_prefix}_nsym").upper().strip()
     new_pos_px = c_in2.number_input("Buy Price ($)", min_value=0.01, value=100.0, step=1.0, key=f"{key_prefix}_npx")
@@ -1060,7 +1098,7 @@ def render_active_positions_manager(key_prefix="ap"):
       placeholder="e.g. Stage 2 Higher Low bounce off rising 20-EMA, strong RVOL",
       key=f"{key_prefix}_nrmk"
     )
-    if c_btn.button("💾 Save Trade", type="primary", use_container_width=True, key=f"{key_prefix}_nsave"):
+    if c_btn.button("Save Trade", type="primary", use_container_width=True, key=f"{key_prefix}_nsave"):
       if new_pos_sym:
         dt_s = new_pos_dt.strftime("%Y-%m-%d")
         new_trade = {
@@ -1101,7 +1139,7 @@ def render_active_positions_manager(key_prefix="ap"):
       c_p1, c_p2, c_p3 = st.columns([1.5, 4.6, 1.9])
       with c_p1:
         st.markdown(
-          f"**<a href='?inspect={sym}' target='_self' class='ticker-link'>📊 {sym}</a>**<br>"
+          f"**<a href='?inspect={sym}' target='_self' class='ticker-link'>{sym}</a>**<br>"
           f"<span style='font-size:1.35rem;font-weight:800;'>${live_price:,.2f}</span> "
           f"<span style='font-size:0.82rem;color:{clr_day};font-weight:700;'>({day_pct:+.2f}%)</span><br>"
           f"<span style='font-size:0.76rem;color:#64748b;'>Bought: {p.get('BuyDate', 'N/A')}</span>",
@@ -1116,19 +1154,19 @@ def render_active_positions_manager(key_prefix="ap"):
           f"<div><span style='font-size:0.73rem;color:#64748b;'>Today's Gain</span><br><b style='color:{clr_day};'>${pos_day_pnl:+,.2f}</b></div>"
           f"<div><span style='font-size:0.73rem;color:#64748b;'>Unrealized P&L</span><br><b style='color:{clr_pnl};'>${pnl:+,.2f} ({pnl_pct:+.2f}%)</b></div>"
           f"</div>"
-          f"<div style='font-size:0.80rem;color:#334155;margin-top:5px;'>📝 <b>Thesis / Remarks:</b> <i>{rmk_str}</i> · <b>20-EMA:</b> ${ema20:,.2f}</div>",
+          f"<div style='font-size:0.80rem;color:#334155;margin-top:5px;'><b>Thesis / Remarks:</b> <i>{rmk_str}</i> · <b>20-EMA:</b> ${ema20:,.2f}</div>",
           unsafe_allow_html=True
         )
         if live_price <= p["StopLoss"]:
-          st.error(f"🚨 STOP-LOSS HIT: {sym} (${live_price:,.2f}) is at/below your stop (${p['StopLoss']:,.2f})!")
+          st.error(f"STOP-LOSS HIT: {sym} (${live_price:,.2f}) is at/below your stop (${p['StopLoss']:,.2f})!")
         elif live_price >= p["Target15"] and not p.get("HalfSold", False):
-          st.warning(f"💰 +15% Target Reached! Open '⚙️ Manage Trade' to Sell 50% ({max(1, shares//2)} shs), Hold & Lock Profit Stop, or Pyramid.")
+          st.warning(f"+15% Target Reached! Open 'Manage Trade' to Sell 50% ({max(1, shares//2)} shs), Hold & Lock Profit Stop, or Pyramid.")
         elif live_price < ema20:
-          st.error(f"⚠️ Trailing Warning: {sym} dropped below its 20-day EMA (${ema20:,.2f}).")
+          st.error(f"Trailing Warning: {sym} dropped below its 20-day EMA (${ema20:,.2f}).")
       with c_p3:
-        with st.popover("⚙️ Manage Trade", use_container_width=True):
+        with st.popover("Manage Trade", use_container_width=True):
           st.markdown(f"**Manage `{sym}` ({shares} shs @ ${bp:,.2f})**")
-          t_sell, t_trail, t_add, t_close = st.tabs(["💰 Sell/Trim", "🚀 Trail Stop", "➕ Add Batch", "📝 Note/Close"])
+          t_sell, t_trail, t_add, t_close = st.tabs(["Sell/Trim", "Trail Stop", "Add Batch", "Note/Close"])
           with t_sell:
             st.caption("Sell a portion (e.g. 50%) to lock in gains & auto-raise your stop-loss.")
             sell_shs = st.number_input("Shares to Sell", min_value=1, max_value=max(1, shares), value=max(1, shares // 2), key=f"{key_prefix}_sshs_{p['id']}")
@@ -1144,7 +1182,7 @@ def render_active_positions_manager(key_prefix="ap"):
               key=f"{key_prefix}_srule_{p['id']}"
             )
             sell_rmk = st.text_input("Trim Note", value=f"Sold {sell_shs} shs @ ${sell_px:,.2f}; raised stop", key=f"{key_prefix}_srmk_{p['id']}")
-            if st.button("✅ Execute Partial Sale & Raise Stop", type="primary", use_container_width=True, key=f"{key_prefix}_sbtn_{p['id']}"):
+            if st.button("Execute Partial Sale & Raise Stop", type="primary", use_container_width=True, key=f"{key_prefix}_sbtn_{p['id']}"):
               realized_d = (sell_px - bp) * sell_shs
               realized_p = ((sell_px - bp) / bp) * 100.0 if bp > 0 else 0.0
               if stop_rule_after_sell.startswith("Breakeven"):
@@ -1181,7 +1219,7 @@ def render_active_positions_manager(key_prefix="ap"):
               key=f"{key_prefix}_tmode_{p['id']}"
             )
             custom_st = st.number_input("Custom Stop ($)", min_value=0.01, value=float(round(p["StopLoss"], 2)), step=0.5, key=f"{key_prefix}_tcust_{p['id']}")
-            if st.button("🚀 Update Stop-Loss & Arm Alert", type="primary", use_container_width=True, key=f"{key_prefix}_tbtn_{p['id']}"):
+            if st.button("Update Stop-Loss & Arm Alert", type="primary", use_container_width=True, key=f"{key_prefix}_tbtn_{p['id']}"):
               if trail_mode.startswith("Breakeven"):
                 chosen_st = bp
               elif trail_mode.startswith("Lock +5%"):
@@ -1215,7 +1253,7 @@ def render_active_positions_manager(key_prefix="ap"):
               key=f"{key_prefix}_arule_{p['id']}"
             )
             add_rmk = st.text_input("Add Batch Note", value=f"Added {add_shs} shs @ ${add_px:,.2f}", key=f"{key_prefix}_armk_{p['id']}")
-            if st.button("➕ Confirm Add & Recalculate Stop", type="primary", use_container_width=True, key=f"{key_prefix}_abtn_{p['id']}"):
+            if st.button("Confirm Add & Recalculate Stop", type="primary", use_container_width=True, key=f"{key_prefix}_abtn_{p['id']}"):
               if add_stop_rule.startswith("New Blended"):
                 calc_st = new_avg_bp
               elif add_stop_rule.startswith("20-Day EMA"):
@@ -1234,28 +1272,28 @@ def render_active_positions_manager(key_prefix="ap"):
               st.rerun()
           with t_close:
             upd_rmk = st.text_input("Edit Trade Remarks / Thesis", value=rmk_str, key=f"{key_prefix}_urmk_{p['id']}")
-            if st.button("💾 Save Remarks", use_container_width=True, key=f"{key_prefix}_srmk_btn_{p['id']}"):
+            if st.button("Save Remarks", use_container_width=True, key=f"{key_prefix}_srmk_btn_{p['id']}"):
               positions[idx]["Remarks"] = upd_rmk.strip()
               sync_file_to_github(positions, POSITIONS_FILE)
               st.rerun()
             st.markdown("---")
             exit_px = st.number_input("Full Exit Sell Price ($)", min_value=0.01, value=float(round(live_price, 2)), step=0.5, key=f"{key_prefix}_xpx_{p['id']}")
             exit_rmk = st.text_input("Exit Remarks / Lesson", value="Closed full position", key=f"{key_prefix}_xrmk_{p['id']}")
-            if st.button("🛑 Close Full Position & Log to Ledger", type="primary", use_container_width=True, key=f"{key_prefix}_xbtn_{p['id']}"):
+            if st.button("Close Full Position & Log to Ledger", type="primary", use_container_width=True, key=f"{key_prefix}_xbtn_{p['id']}"):
               realized_d = (exit_px - bp) * shares
               realized_p = ((exit_px - bp) / bp) * 100.0 if bp > 0 else 0.0
               log_ledger_entry("CLOSE", sym, shares, bp, exit_px, realized_d, realized_p, p["StopLoss"], f"{rmk_str} | {exit_rmk}".strip(" |"))
               positions.pop(idx)
               sync_file_to_github(positions, POSITIONS_FILE)
               st.rerun()
-            if st.button("🗑️ Delete Without Logging", use_container_width=True, key=f"{key_prefix}_del_{p['id']}"):
+            if st.button("Delete Without Logging", use_container_width=True, key=f"{key_prefix}_del_{p['id']}"):
               positions.pop(idx)
               sync_file_to_github(positions, POSITIONS_FILE)
               st.rerun()
       st.markdown("<hr style='margin:10px 0;'>", unsafe_allow_html=True)
   else:
-    st.info("No active positions currently open. Use '➕ Log a New Position' above to start tracking.")
-  st.markdown("### 📒 Complete Trade Ledger & Excel Export")
+    st.info("No active positions currently open. Use 'Log a New Position' above to start tracking.")
+  st.markdown("### Complete Trade Ledger & Excel Export")
   lc1, lc2, lc3 = st.columns([1.4, 1.4, 2.2])
   default_start = datetime(2025, 1, 1).date()
   default_end = datetime.now().date()
@@ -1333,7 +1371,7 @@ def render_active_positions_manager(key_prefix="ap"):
         ])
         summary_df.to_excel(writer, sheet_name="Portfolio_Summary", index=False)
       dl_c1.download_button(
-        "📥 Download Trade Ledger Excel (.xlsx)",
+        "Download Trade Ledger Excel (.xlsx)",
         data=excel_buf.getvalue(),
         file_name=f"trade_ledger_{from_str}_to_{to_str}.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -1344,7 +1382,7 @@ def render_active_positions_manager(key_prefix="ap"):
     except Exception:
       pass
     dl_c2.download_button(
-      "📥 Download Trade Ledger CSV (.csv)",
+      "Download Trade Ledger CSV (.csv)",
       data=df_ledger.to_csv(index=False).encode("utf-8"),
       file_name=f"trade_ledger_{from_str}_to_{to_str}.csv",
       mime="text/csv",
@@ -1403,7 +1441,7 @@ def get_gemini_api_key():
 def query_gemini_copilot(user_prompt, chat_history, portfolio_context):
   api_key = get_gemini_api_key()
   if not api_key:
-    return "⚠️ Please enter your **Gemini API Key** in the box above (or add `GEMINI_API_KEY` to your Streamlit Secrets) to activate live AI chat."
+    return "Please enter your **Gemini API Key** in the box above (or add `GEMINI_API_KEY` to your Streamlit Secrets) to activate live AI chat."
   url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key}"
   sys_text = (
     "You are the user's personal AI Macro & Trading Co-Pilot embedded inside their Quality Momentum & Stage 2 Cockpit. "
@@ -1436,19 +1474,19 @@ def query_gemini_copilot(user_prompt, chat_history, portfolio_context):
       res_json = json.loads(resp.read().decode("utf-8"))
       return res_json["candidates"][0]["content"]["parts"][0]["text"]
   except Exception as e:
-    return f"⚠️ Gemini API Error: {str(e)[:180]}"
+    return f"Gemini API Error: {str(e)[:180]}"
 
 def render_ai_copilot_tab():
-  st.markdown("<h1>🤖 AI Macro & Trade Co-Pilot</h1>", unsafe_allow_html=True)
+  st.markdown("<h1>AI Macro & Trade Co-Pilot</h1>", unsafe_allow_html=True)
   st.markdown(
     '<div style="background:#0f291e;color:#f4efe6;padding:12px 16px;border-radius:10px;margin-bottom:14px;">'
     '<div style="font-size:0.75rem;color:#c5a059;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;">'
     'INTEREST RATE CYCLE POSITION (BULL 1-2-3 / BEAR 1-2-3 FRAMEWORK)</div>'
     '<div style="font-size:0.95rem;font-weight:700;margin-top:4px;">'
-    '🟢 Bull 1 (Stop Cutting: ON) ➔ 🟡 Bull 2 (First HikeShakeout: OFF) ➔ '
+    'Bull 1 (Stop Cutting: ON) Bull 2 (First HikeShakeout: OFF) '
     '<span style="background:#15803d;color:#fff;padding:2px 8px;border-radius:4px;">'
-    '🚀 CURRENT: Late Bull 2 / Early Bull 3 (Hike Pause · Expansion Wave ON)</span> '
-    '➔ 🔴 Bear 1 (First Rate Cut: OFF)</div>'
+    'CURRENT: Late Bull 2 / Early Bull 3 (Hike Pause · Expansion Wave ON)</span> '
+    'Bear 1 (First Rate Cut: OFF)</div>'
     '<div style="font-size:0.80rem;color:#cbd5e1;margin-top:6px;">'
     '<b>Playbook Alignment:</b> Following the Sept 2026 hike and Oct 2026 Fed pause, the market is transitioning from Bull 2 digestion into the Bull 3 expansion wave. '
     'Focus on <b>Stage 2 Higher Lows</b> in liquid US leaders & hard assets, scale out 50% on +15% surges, and trail stops above the 20-EMA.'
@@ -1457,8 +1495,8 @@ def render_ai_copilot_tab():
   )
   col_macro, col_chat = st.columns([1.15, 1.35])
   with col_macro:
-    st.subheader("📺 Sunday 8:30 PM HKT Macro Briefing")
-    if st.button("🔄 Refresh Latest Sunday Video Feed", use_container_width=True):
+    st.subheader("Sunday 8:30 PM HKT Macro Briefing")
+    if st.button("Refresh Latest Sunday Video Feed", use_container_width=True):
       fetch_sds_latest_videos.clear()
       st.rerun()
     vids = fetch_sds_latest_videos()
@@ -1469,7 +1507,7 @@ def render_ai_copilot_tab():
         f'<a href="{v["link"]}" target="_blank" style="color:#0f291e;font-weight:700;text-decoration:none;">{v["title"]}</a></div>',
         unsafe_allow_html=True
       )
-    st.markdown("#### 🧠 3-Month Macro Thesis Synthesis")
+    st.markdown("#### 3-Month Macro Thesis Synthesis")
     with st.expander("1. AI Capex & Private-Credit Debt Bubble (CoreWeave / Oracle)", expanded=True):
       st.write(
         "Unlike the 2000 dot-com equity bubble, Big Tech is locked in a Game Theory prisoner's dilemma—burning free cash flow on GPUs while AI data-center landlords (CoreWeave, Oracle) borrow at 10%–15% high-yield rates packaged into pension/insurance products. Watch credit spreads and debt rollovers, and never hold blindly without a trailing stop."
@@ -1485,16 +1523,16 @@ def render_ai_copilot_tab():
     st.markdown("**Quick Macro & Portfolio Prompts:**")
     qp1, qp2 = st.columns(2)
     prompt_to_send = None
-    if qp1.button("📊 Review My Open Positions", use_container_width=True):
+    if qp1.button("Review My Open Positions", use_container_width=True):
       prompt_to_send = "Review my current active positions, unrealized P&L, and stop-losses. Which positions need stop adjustments or partial profit-taking right now?"
-    if qp2.button("🌎 Macro & Bull 2/3 Strategy", use_container_width=True):
+    if qp2.button("Macro & Bull 2/3 Strategy", use_container_width=True):
       prompt_to_send = "How should I position my portfolio right now given the Bull 2 to Bull 3 rate-cycle transition, the AI debt cycle, and 23-hour US trading liquidity flows?"
   with col_chat:
-    st.subheader("💬 Gemini Co-Pilot Chat")
+    st.subheader("Gemini Co-Pilot Chat")
     curr_key = get_gemini_api_key()
-    with st.expander("🔑 Gemini API Key Settings" if curr_key else "🔑 Enter Gemini API Key to Enable Chat", expanded=not bool(curr_key)):
+    with st.expander("Gemini API Key Settings" if curr_key else "Enter Gemini API Key to Enable Chat", expanded=not bool(curr_key)):
       in_key = st.text_input("Gemini API Key (from Google AI Studio)", value=curr_key, type="password", key="gem_key_in")
-      if st.button("💾 Save API Key", key="save_gem_key"):
+      if st.button("Save API Key", key="save_gem_key"):
         settings["gemini_api_key"] = in_key.strip()
         save_json(SETTINGS_FILE, settings)
         st.success("API Key saved!")
@@ -1518,7 +1556,7 @@ def render_ai_copilot_tab():
       st.session_state.chat_messages.append({"role": "assistant", "content": reply})
       st.rerun()
     if st.session_state.chat_messages:
-      if st.button("🗑️ Clear Chat History", key="clr_chat_btn"):
+      if st.button("Clear Chat History", key="clr_chat_btn"):
         st.session_state.chat_messages = []
         st.rerun()
 MACRO_SYMBOLS = {
@@ -1531,7 +1569,7 @@ MACRO_SYMBOLS = {
 def fetch_macro_and_regime():
   ticks = list(MACRO_SYMBOLS.values())
   out = {}
-  regime = {"label": "🟢 MARKET REGIME: BULLISH — S&P 500 Holding Trend · Favorable for New Setups", "bg": "#dcfce7", "border": "#86efac", "color": "#14532d"}
+  regime = {"label": "MARKET REGIME: BULLISH — S&P 500 Holding Trend · Favorable for New Setups", "bg": "#dcfce7", "border": "#86efac", "color": "#14532d"}
   try:
     df = yf.download(ticks, period="3mo", interval="1d", group_by="ticker", progress=False)
     for name, sym in MACRO_SYMBOLS.items():
@@ -1546,11 +1584,11 @@ def fetch_macro_and_regime():
       sp_ema50 = float(sp["Close"].ewm(span=50, adjust=False).mean().iloc[-1])
       vix_c = out.get("VIX", (18.0, 0, 0))[0]
       if sp_c > sp_ema50 and sp_c > sp_ema20 and vix_c < 21.0:
-        regime = {"label": f"🟢 MARKET REGIME: BULLISH (S&P 500 Above 20 & 50 EMA · VIX {vix_c:.1f}) — Green Light for TCT, Swing & Momentum Buys", "bg": "#dcfce7", "border": "#86efac", "color": "#14532d"}
+        regime = {"label": f"MARKET REGIME: BULLISH (S&P 500 Above 20 & 50 EMA · VIX {vix_c:.1f}) — Green Light for TCT, Swing & Momentum Buys", "bg": "#dcfce7", "border": "#86efac", "color": "#14532d"}
       elif sp_c < sp_ema50 or vix_c >= 25.0:
-        regime = {"label": f"🔴 MARKET REGIME: RISK-OFF / CORRECTION (S&P Below 50 EMA or VIX Elevated at {vix_c:.1f}) — Protect Capital, Avoid Aggressive New Buys", "bg": "#fee2e2", "border": "#fca5a5", "color": "#7f1d1d"}
+        regime = {"label": f"MARKET REGIME: RISK-OFF / CORRECTION (S&P Below 50 EMA or VIX Elevated at {vix_c:.1f}) — Protect Capital, Avoid Aggressive New Buys", "bg": "#fee2e2", "border": "#fca5a5", "color": "#7f1d1d"}
       else:
-        regime = {"label": f"🟡 MARKET REGIME: CHOPPY / CAUTION (S&P Consolidating · VIX {vix_c:.1f}) — Be Selective, Focus on 20-EMA Pullbacks & True TCT Bottoms", "bg": "#fef9c3", "border": "#fde047", "color": "#713f12"}
+        regime = {"label": f"MARKET REGIME: CHOPPY / CAUTION (S&P Consolidating · VIX {vix_c:.1f}) — Be Selective, Focus on 20-EMA Pullbacks & True TCT Bottoms", "bg": "#fef9c3", "border": "#fde047", "color": "#713f12"}
   except Exception:
     pass
   return out, regime
@@ -1569,22 +1607,22 @@ navigation = st.sidebar.radio(
   "Navigation",
   [
     "Dashboard",
-    "💼 Active Positions",
-    "⚡ Live Real-Time Quotes",
+    "Active Positions",
+    "Live Real-Time Quotes",
     "Screener",
     "Watchlist",
     "Precious Metals, Crypto & Currency",
-    "🤖 AI Macro & Trade Co-Pilot",
+    "AI Macro & Trade Co-Pilot",
     "News & Earnings",
     "Settings"
   ],
   key="nav_radio", label_visibility="collapsed", on_change=clear_inspection
 )
 st.sidebar.markdown("---")
-sync_badge = "🟢 GitHub Auto-Sync Active" if get_github_token() else "🟡 Local Mode (Add GITHUB_TOKEN)"
+sync_badge = "GitHub Auto-Sync Active" if get_github_token() else "Local Mode (Add GITHUB_TOKEN)"
 st.sidebar.markdown(f"""<div style="position:fixed;bottom:18px;font-size:0.74rem;color:#a1a1aa;">{sync_badge}<br>Tap any <b>Stock Symbol</b> to open chart</div>""", unsafe_allow_html=True)
 
-if navigation != "⚡ Live Real-Time Quotes" or st.session_state.inspect_symbol is not None:
+if navigation != "Live Real-Time Quotes" or st.session_state.inspect_symbol is not None:
   macro_data, regime_info = fetch_macro_and_regime()
   if macro_data:
     cards_html = "".join([
@@ -1609,7 +1647,7 @@ if st.session_state.inspect_symbol is not None:
   header_label = f"{sym} - {comp_name}" if comp_name and comp_name.upper() != sym.upper() else sym
   col_back, col_title = st.columns([1.2, 8.8])
   with col_back:
-    if st.button("⬅ Back", type="primary"):
+    if st.button("Back", type="primary"):
       clear_inspection()
       st.rerun()
   with col_title:
@@ -1778,7 +1816,7 @@ TODAY'S STANDOUT SETUP · {best_pick['TCT_Action']} · {best_pick['TCT_Model']}
 </div>
 <div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px;">
 <div>
-<a href="?inspect={best_pick['Ticker']}" target="_self" class="hero-ticker-link">📊 {best_pick['Ticker']}</a>
+<a href="?inspect={best_pick['Ticker']}" target="_self" class="hero-ticker-link">{best_pick['Ticker']}</a>
 <span style="font-size:1.25rem;color:#e2e8f0;margin-left:10px;font-weight:700;">${best_pick['Price']:,.2f}</span>
 <span style="color:{'#4ade80' if best_pick['Change'] >= 0 else '#f87171'};font-weight:700;margin-left:8px;">
 {arr_b}${abs(best_pick['Change']):.2f} ({best_pick['Change_Pct']:+.2f}%)
@@ -1823,7 +1861,7 @@ TODAY'S STANDOUT SETUP · {best_pick['TCT_Action']} · {best_pick['TCT_Model']}
 <div style="background:white;border:1px solid #e7e2d9;border-radius:8px;padding:10px 14px;margin-bottom:8px;">
 <div style="display:flex;justify-content:space-between;align-items:center;">
 <div>
-<a href="?inspect={r['Ticker']}" target="_self" class="ticker-link" style="font-size:1.05rem;">📊 {r['Ticker']}</a>
+<a href="?inspect={r['Ticker']}" target="_self" class="ticker-link" style="font-size:1.05rem;">{r['Ticker']}</a>
 <span class="badge {r['TCT_Badge']}" style="margin-left:6px;font-size:0.62rem;">{r['TCT_Action']}</span>
 </div>
 <div style="text-align:right;">
@@ -1837,11 +1875,11 @@ TODAY'S STANDOUT SETUP · {best_pick['TCT_Action']} · {best_pick['TCT_Model']}
 </div>
 """, unsafe_allow_html=True
         )
-  elif navigation == "💼 Active Positions":
+  elif navigation == "Active Positions":
     render_active_positions_manager(key_prefix="nav_ap")
-  elif navigation == "🤖 AI Macro & Trade Co-Pilot":
+  elif navigation == "AI Macro & Trade Co-Pilot":
     render_ai_copilot_tab()
-  elif navigation == "⚡ Live Real-Time Quotes":
+  elif navigation == "Live Real-Time Quotes":
     st.markdown("""<style>.block-container { padding-top: 2.8rem !important; padding-bottom: 1rem !important; padding-left: 1.2rem !important; padding-right: 1.2rem !important; }</style>""", unsafe_allow_html=True)
     folder_names = list(watchlists.keys())
     folder_options = folder_names + ["All Watchlists Combined"]
@@ -1853,23 +1891,23 @@ TODAY'S STANDOUT SETUP · {best_pick['TCT_Action']} · {best_pick['TCT_Model']}
         st.session_state.live_folder_sel = selected_live_folder
         persist_ui_state()
     with ctrl2:
-      live_board_mode = st.selectbox("Board Mode", ["📊 Custom Signal Board (Large Font)", "⚡ TradingView Streaming (Tick-by-Tick)"], index=0, label_visibility="collapsed")
+      live_board_mode = st.selectbox("Board Mode", ["Custom Signal Board (Large Font)", "TradingView Streaming (Tick-by-Tick)"], index=0, label_visibility="collapsed")
     with ctrl3:
       live_sort = st.selectbox(
         "Rank / Sort",
         [
           "Rank: My Saved Order",
-          "Rank: 🟢 Action Signal (Buy First)",
-          "Rank: 📈 Day % Change (Gainers)",
-          "Rank: 📉 Day % Change (Losers)",
-          "Rank: 🔥 Relative Strength vs S&P",
-          "Rank: 💯 Composite Score"
+          "Rank: Action Signal (Buy First)",
+          "Rank: Day % Change (Gainers)",
+          "Rank: Day % Change (Losers)",
+          "Rank: Relative Strength vs S&P",
+          "Rank: Composite Score"
         ],
-        index=0,
+        index=1,
         label_visibility="collapsed"
       )
     with ctrl4:
-      auto_refresh_choice = st.selectbox("Auto-Refresh Timer", ["⏱️ Auto: Off", "⏱️ Auto: 15s", "⏱️ Auto: 30s", "⏱️ Auto: 60s"], index=0, label_visibility="collapsed")
+      auto_refresh_choice = st.selectbox("Auto-Refresh Timer", ["Auto: Off", "Auto: 15s", "Auto: 30s", "Auto: 60s"], index=3, label_visibility="collapsed")
     with ctrl5:
       if selected_live_folder != "All Watchlists Combined" and selected_live_folder != "Active Positions":
         quick_add = st.text_input("Quick Add Ticker", placeholder=f"+ Add to {selected_live_folder}", label_visibility="collapsed").upper().strip()
@@ -1880,12 +1918,12 @@ TODAY'S STANDOUT SETUP · {best_pick['TCT_Action']} · {best_pick['TCT_Model']}
       else:
         st.caption("All Combined Lists" if selected_live_folder == "All Watchlists Combined" else "Managed via Watchlist Tab")
     with ctrl6:
-      if st.button("🔄", help="Refresh Quotes Now", use_container_width=True):
+      if st.button("Refresh", help="Refresh Quotes Now", use_container_width=True):
         st.cache_data.clear()
         st.rerun()
     with ctrl7:
       if selected_live_folder != "Active Positions":
-        edit_mode_live = st.checkbox("✏️ Edit List", value=False)
+        edit_mode_live = st.checkbox("Edit List", value=False)
       else:
         edit_mode_live = False
     if edit_mode_live:
@@ -1896,24 +1934,24 @@ TODAY'S STANDOUT SETUP · {best_pick['TCT_Action']} · {best_pick['TCT_Model']}
       active_live_syms = [p["Ticker"] for p in positions]
     else:
       active_live_syms = list(watchlists.get(selected_live_folder, []))
-    run_every_sec = {"⏱️ Auto: Off": None, "⏱️ Auto: 15s": 15, "⏱️ Auto: 30s": 30, "⏱️ Auto: 60s": 60}.get(auto_refresh_choice)
+    run_every_sec = {"Auto: Off": None, "Auto: 15s": 15, "Auto: 30s": 30, "Auto: 60s": 60}.get(auto_refresh_choice)
     def render_live_watchboard_content():
       bucket = int(time.time() // run_every_sec) if run_every_sec else int(time.time() // 120)
       live_records = fetch_batch_market_data(active_live_syms, account_size=settings["account_size"], refresh_bucket=bucket)
       ordered_syms = [s for s in active_live_syms if s in live_records]
       missing_syms = [s for s in active_live_syms if s not in live_records]
-      if live_sort == "Rank: 🟢 Action Signal (Buy First)":
+      if live_sort == "Rank: Action Signal (Buy First)":
         ordered_syms = sorted(ordered_syms, key=lambda s: (live_records[s]["TCT_Priority"], -live_records[s]["Score"]))
-      elif live_sort == "Rank: 📈 Day % Change (Gainers)":
+      elif live_sort == "Rank: Day % Change (Gainers)":
         ordered_syms = sorted(ordered_syms, key=lambda s: live_records[s]["Change_Pct"], reverse=True)
-      elif live_sort == "Rank: 📉 Day % Change (Losers)":
+      elif live_sort == "Rank: Day % Change (Losers)":
         ordered_syms = sorted(ordered_syms, key=lambda s: live_records[s]["Change_Pct"])
-      elif live_sort == "Rank: 🔥 Relative Strength vs S&P":
+      elif live_sort == "Rank: Relative Strength vs S&P":
         ordered_syms = sorted(ordered_syms, key=lambda s: live_records[s]["RS_Diff"], reverse=True)
-      elif live_sort == "Rank: 💯 Composite Score":
+      elif live_sort == "Rank: Composite Score":
         ordered_syms = sorted(ordered_syms, key=lambda s: live_records[s]["Score"], reverse=True)
       if selected_live_folder == "Active Positions":
-        st.markdown("### 💼 My Active Positions & Rule Enforcer")
+        st.markdown("### My Active Positions & Rule Enforcer")
         tot_invested = sum(p["Shares"] * p["BuyPrice"] for p in positions)
         tot_value = sum(p["Shares"] * live_records.get(p["Ticker"], {}).get("Price", p["BuyPrice"]) for p in positions)
         daily_pnl = sum(p["Shares"] * live_records.get(p["Ticker"], {}).get("Change", 0.0) for p in positions)
@@ -1943,11 +1981,11 @@ TODAY'S STANDOUT SETUP · {best_pick['TCT_Action']} · {best_pick['TCT_Model']}
             arrow = "▲" if d["Change"] >= 0 else "▼"
             rule_status = f'<span class="badge {d["TCT_Badge"]}">{d["TCT_Action"]}</span>'
             if price <= p["StopLoss"]:
-              rule_status = '<span class="badge badge-tct-sell" style="background:#dc2626;">🚨 STOP HIT</span>'
+              rule_status = '<span class="badge badge-tct-sell" style="background:#dc2626;">STOP HIT</span>'
             elif price >= p["Target15"] and not p.get("HalfSold", False):
-              rule_status = '<span class="badge badge-tct-buy" style="background:#059669;">💰 UP +15% (SELL 50%)</span>'
+              rule_status = '<span class="badge badge-tct-buy" style="background:#059669;">UP +15% (SELL 50%)</span>'
             elif price < d["EMA20_Val"]:
-              rule_status = '<span class="badge badge-caution">⚠️ BROKE 20-EMA</span>'
+              rule_status = '<span class="badge badge-caution">BROKE 20-EMA</span>'
             rows_html += (
               f'<tr>'
               f'<td>{rule_status}</td>'
@@ -1968,7 +2006,7 @@ TODAY'S STANDOUT SETUP · {best_pick['TCT_Action']} · {best_pick['TCT_Model']}
           )
         else:
           st.info("No active positions tracked. Manage your positions in the Watchlist tab.")
-      elif live_board_mode.startswith("📊 Custom Signal Board"):
+      elif live_board_mode.startswith("Custom Signal Board"):
         def build_half_table_html(sym_slice):
           rows_html = ""
           for sym in sym_slice:
@@ -1977,12 +2015,12 @@ TODAY'S STANDOUT SETUP · {best_pick['TCT_Action']} · {best_pick['TCT_Model']}
             color = "#15803d" if chg >= 0 else "#b91c1c"
             arrow = "▲" if chg >= 0 else "▼"
             sign = "+" if chg >= 0 else "-"
-            short_sig = d.get("TCT_Short_Sig", "🔵 Uptrend")
+            short_sig = d.get("TCT_Short_Sig", "Uptrend")
             rows_html += (
               f'<tr>'
               f'<td>{short_sig}</td>'
               f'<td><a href="?rt_chart={sym}" target="_self" class="rt-sym-link" title="Tap to open live chart below">{sym}</a>'
-              f'<a href="?inspect={sym}" target="_self" class="rt-dossier-link" title="Open Full TCT Dossier">📋</a></td>'
+              f'<a href="?inspect={sym}" target="_self" class="rt-dossier-link" title="Open Full TCT Dossier">[Dossier]</a></td>'
               f'<td style="font-weight:800;color:{color};">{arrow} {d["Price"]:,.2f}</td>'
               f'<td style="color:{color};font-weight:700;">{sign}{abs(chg):.2f} ({pct:+.2f}%)</td>'
               f'<td style="color:#15803d;font-weight:600;">{d["Day_High"]:,.2f}</td>'
@@ -1996,7 +2034,7 @@ TODAY'S STANDOUT SETUP · {best_pick['TCT_Action']} · {best_pick['TCT_Model']}
           right_table_html = build_half_table_html(ordered_syms[mid:]) if ordered_syms[mid:] else ""
           st.markdown(f'<div class="live-board-grid"><div>{left_table_html}</div><div>{right_table_html}</div></div>', unsafe_allow_html=True)
           timer_status = f"Auto-refreshing every {run_every_sec}s (Instant ntfy Active)" if run_every_sec else "Manual refresh mode"
-          st.caption(f"🔥 Momentum · 🟢 Buy Now · 🎯 Swing Buy · 🪃 Oversold · 📐 TCT Box · 🔵 Uptrend  |  **Tap Symbol** for Bottom Live Chart · Tap **📋** for Dossier  |  *{timer_status} · Last updated: {datetime.now().strftime('%H:%M:%S')}*")
+          st.caption(f"Momentum · Buy Now · Swing Buy · Oversold · TCT Box · Uptrend  |  **Tap Symbol** for Bottom Live Chart · Tap **** for Dossier  |  *{timer_status} · Last updated: {datetime.now().strftime('%H:%M:%S')}*")
         else:
           st.info("No symbols found in this watchlist.")
       else:
@@ -2053,7 +2091,7 @@ TODAY'S STANDOUT SETUP · {best_pick['TCT_Action']} · {best_pick['TCT_Model']}
                 f'</script></div>',
                 height=wh + 16
               )
-          pills_b = "".join([f'<a href="?rt_chart={s}" target="_self" class="pill" title="Open Bottom Live Chart">{live_records[s]["TCT_Dot"] if s in live_records else "📈"} {s}</a>' for s in tv_all_syms])
+          pills_b = "".join([f'<a href="?rt_chart={s}" target="_self" class="pill" title="Open Bottom Live Chart">{live_records[s]["TCT_Dot"] if s in live_records else ""} {s}</a>' for s in tv_all_syms])
           st.markdown(f"<div style='margin-top:4px;'><b>Tap any symbol to open Bottom Live Chart:</b><br>{pills_b}</div>", unsafe_allow_html=True)
     if run_every_sec and hasattr(st, "fragment"):
       @st.fragment(run_every=run_every_sec)
@@ -2067,15 +2105,15 @@ TODAY'S STANDOUT SETUP · {best_pick['TCT_Action']} · {best_pick['TCT_Model']}
       st.markdown("---")
       ch_c1, ch_c2, ch_c3, ch_c4 = st.columns([3.5, 2.0, 2.0, 1.5])
       with ch_c1:
-        st.markdown(f"### 📈 Live Streaming Chart: `{chart_sym}`")
+        st.markdown(f"### Live Streaming Chart: `{chart_sym}`")
       with ch_c2:
         rt_interval = st.selectbox("Timeframe", ["5", "15", "60", "240", "D"], format_func=lambda x: {"5": "5-Minute", "15": "15-Minute", "60": "1-Hour (BOS)", "240": "4-Hour", "D": "Daily"}[x], index=2, label_visibility="collapsed")
       with ch_c3:
-        if st.button(f"📋 Open {chart_sym} Full Dossier", use_container_width=True):
+        if st.button(f"Open {chart_sym} Full Dossier", use_container_width=True):
           st.session_state.inspect_symbol = chart_sym
           st.rerun()
       with ch_c4:
-        if st.button("✖ Close Chart", type="primary", use_container_width=True):
+        if st.button("Close Chart", type="primary", use_container_width=True):
           st.session_state.rt_chart_symbol = None
           st.rerun()
       components.html(f"""
@@ -2128,54 +2166,54 @@ new TradingView.widget({{
     st.markdown("### 2. One-Tap Strategy Preset Scans")
     r1_c1, r1_c2, r1_c3, r1_c4 = st.columns(4)
     r2_c1, r2_c2, r2_c3, r2_c4 = st.columns(4)
-    if r1_c1.button("📈 Stage 2 Higher Low", use_container_width=True, type="primary"):
+    if r1_c1.button("Stage 2 Higher Low", use_container_width=True, type="primary"):
       s_data = fetch_batch_market_data(get_target_universe(list(GICS_SECTORS.keys())), account_size=settings["account_size"])
       res_l = sorted([d for d in s_data.values() if d.get("Is_Stage2_Higher_Low")], key=lambda x: -x["Score"])
-      _save_screener_results(res_l, "📈 Stage 2 Higher Low")
-    if r1_c2.button("🔔 150-MA Reversal Radar (Research)", use_container_width=True, type="primary"):
+      _save_screener_results(res_l, "Stage 2 Higher Low")
+    if r1_c2.button("150-MA Reversal Radar (Research)", use_container_width=True, type="primary"):
       s_data = fetch_batch_market_data(get_target_universe(list(GICS_SECTORS.keys())), account_size=settings["account_size"])
       res_l = sorted([d for d in s_data.values() if d.get("Is_150MA_Reversal_Radar")], key=lambda x: -x["Score"])
-      _save_screener_results(res_l, "🔔 150-MA Reversal Radar")
-    if r1_c3.button("🔥 Pure Momentum Leaders", use_container_width=True):
+      _save_screener_results(res_l, "150-MA Reversal Radar")
+    if r1_c3.button("Pure Momentum Leaders", use_container_width=True):
       s_data = fetch_batch_market_data(get_target_universe(list(GICS_SECTORS.keys())), account_size=settings["account_size"])
       res_l = sorted([d for d in s_data.values() if d["Is_Pure_Momentum"]], key=lambda x: -x["RS_Diff"])
-      _save_screener_results(res_l, "🔥 Pure Momentum Leaders (RS+, Price>20/50/200, RSI 55-75)")
-    if r1_c4.button("🟢 All 'BUY NOW' Triggers", use_container_width=True):
+      _save_screener_results(res_l, "Pure Momentum Leaders (RS+, Price>20/50/200, RSI 55-75)")
+    if r1_c4.button("All 'BUY NOW' Triggers", use_container_width=True):
       s_data = fetch_batch_market_data(get_target_universe(list(GICS_SECTORS.keys())), account_size=settings["account_size"])
       res_l = sorted([d for d in s_data.values() if d["TCT_Priority"] == 0], key=lambda x: -x["Score"])
-      _save_screener_results(res_l, "🟢 All Immediate 'BUY NOW' & 'SWING BUY' Triggers")
-    if r2_c1.button("📐 TCT Bottom Boxes", use_container_width=True):
+      _save_screener_results(res_l, "All Immediate 'BUY NOW' & 'SWING BUY' Triggers")
+    if r2_c1.button("TCT Bottom Boxes", use_container_width=True):
       s_data = fetch_batch_market_data(get_target_universe(list(GICS_SECTORS.keys())), account_size=settings["account_size"])
       res_l = sorted([d for d in s_data.values() if d["TCT_Valid_Range"]], key=lambda x: (x["TCT_Priority"], -x["R_Multiple"]))
-      _save_screener_results(res_l, "📐 Playbook 1: Valid 25+ Bar TCT Accumulation Boxes")
-    if r2_c2.button("🎯 20-EMA Pullback & Coil", use_container_width=True):
+      _save_screener_results(res_l, "Playbook 1: Valid 25+ Bar TCT Accumulation Boxes")
+    if r2_c2.button("20-EMA Pullback & Coil", use_container_width=True):
       s_data = fetch_batch_market_data(get_target_universe(list(GICS_SECTORS.keys())), account_size=settings["account_size"])
       res_l = sorted([d for d in s_data.values() if d["Playbook_Cat"] == "SWING_PULLBACK"], key=lambda x: -x["Score"])
-      _save_screener_results(res_l, "🎯 Playbooks 3 & 4: 20-EMA Pullback & Volatility Squeeze Swings")
-    if r2_c3.button("🚀 20D & Gap Breakouts", use_container_width=True):
+      _save_screener_results(res_l, "Playbooks 3 & 4: 20-EMA Pullback & Volatility Squeeze Swings")
+    if r2_c3.button("20D & Gap Breakouts", use_container_width=True):
       s_data = fetch_batch_market_data(get_target_universe(list(GICS_SECTORS.keys())), account_size=settings["account_size"])
       res_l = sorted([d for d in s_data.values() if d["Playbook_Cat"] == "BREAKOUT"], key=lambda x: -x["Score"])
-      _save_screener_results(res_l, "🚀 Playbooks 2 & 6: Momentum & High-Volume Gap Breakouts")
-    if r2_c4.button("🪃 RSI-2 Oversold Bounce", use_container_width=True):
+      _save_screener_results(res_l, "Playbooks 2 & 6: Momentum & High-Volume Gap Breakouts")
+    if r2_c4.button("RSI-2 Oversold Bounce", use_container_width=True):
       s_data = fetch_batch_market_data(get_target_universe(list(GICS_SECTORS.keys())), account_size=settings["account_size"])
       res_l = sorted([d for d in s_data.values() if d["Is_Oversold_Swing"]], key=lambda x: x["RSI2"])
-      _save_screener_results(res_l, "🪃 Playbook 5: RSI-2 Extreme Oversold Snapback Swings")
+      _save_screener_results(res_l, "Playbook 5: RSI-2 Extreme Oversold Snapback Swings")
     with st.expander("Optional: Custom Sector & Technical Filter Builder", expanded=False):
       f_col1, f_col2, f_col3 = st.columns([1.2, 1.4, 1.4])
       with f_col1:
         selected_sectors = [sec for sec in GICS_SECTORS.keys() if st.checkbox(sec, value=True, key=f"sec_{sec}")]
       with f_col2:
-        s_rs = st.checkbox("🔥 Outperforming S&P 500 (RS Leader)", value=False)
+        s_rs = st.checkbox("Outperforming S&P 500 (RS Leader)", value=False)
         s1 = st.checkbox("RSI Rising Above 55 (Momentum)", value=False)
         s4 = st.checkbox("20-Day High Breakout (Volume Confirmed)", value=False)
         s7 = st.checkbox("Pullback Near 20D or 50D EMA Support", value=False)
-        s_st2 = st.checkbox("📈 Stage 2 Higher Low Only", value=False)
+        s_st2 = st.checkbox("Stage 2 Higher Low Only", value=False)
       with f_col3:
-        tct1 = st.checkbox("🟢 Action = 'BUY NOW' / 'SWING BUY'", value=False)
-        tct2 = st.checkbox("📐 True TCT Bottom Accumulation Box Only", value=False)
+        tct1 = st.checkbox("Action = 'BUY NOW' / 'SWING BUY'", value=False)
+        tct2 = st.checkbox("True TCT Bottom Accumulation Box Only", value=False)
         tct4 = st.checkbox("Reward-to-Risk ≥ 2.0R to Target", value=False)
         tct5 = st.checkbox("Liquidity (20D Dollar Volume ≥ $50M)", value=False)
-        s_rev150 = st.checkbox("🔔 Just Broke Back Above 150-Day MA (Radar)", value=False)
+        s_rev150 = st.checkbox("Just Broke Back Above 150-Day MA (Radar)", value=False)
       if st.button("Run Custom Filter Scan", type="primary"):
         s_data = fetch_batch_market_data(get_target_universe(selected_sectors), account_size=settings["account_size"])
         matches = []
@@ -2211,7 +2249,7 @@ new TradingView.widget({{
         with c1:
           st.markdown(
             f"""
-<div><a href="?inspect={m['Ticker']}" target="_self" class="ticker-link">📊 {m['Ticker']}</a>
+<div><a href="?inspect={m['Ticker']}" target="_self" class="ticker-link">{m['Ticker']}</a>
 <span class="badge {m['TCT_Badge']}">{m['TCT_Action']}</span></div>
 <div style="font-size:0.85rem;color:#71717a;margin-top:3px;">
 ${m['Price']:,.2f} · <span style="color:{'#15803d' if m['Change']>=0 else '#b91c1c'};font-weight:700;">
@@ -2232,7 +2270,7 @@ ${m['Price']:,.2f} · <span style="color:{'#15803d' if m['Change']>=0 else '#b91
         with c3:
           st.plotly_chart(render_sparkline(m["Sparkline"], m["Change"] >= 0), use_container_width=False)
         with c4:
-          if st.button("➕ Add", key=f"add_sc_{m['Ticker']}"):
+          if st.button("Add", key=f"add_sc_{m['Ticker']}"):
             if m["Ticker"] not in watchlists[target_add_folder]:
               watchlists[target_add_folder].append(m["Ticker"])
               sync_file_to_github(watchlists, DATA_FILE)
@@ -2275,26 +2313,26 @@ ${m['Price']:,.2f} · <span style="color:{'#15803d' if m['Change']>=0 else '#b91
           label_visibility="collapsed"
         )
       with col_ed:
-        show_reorder = st.checkbox("✏️ Edit / Reorder List", value=False)
+        show_reorder = st.checkbox("Edit / Reorder List", value=False)
       if show_reorder:
         render_watchlist_reorder_panel(folder, key_prefix="wl_ed")
       st.markdown("**One-Tap Strategy Playbook Filter:**")
       wf1, wf2, wf3, wf4, wf5, wf6, wf7, wf8 = st.columns(8)
-      if wf1.button("📈 Stage 2 HL", use_container_width=True, type="primary" if st.session_state.wl_preset_filter == "STAGE2_HL" else "secondary"):
+      if wf1.button("Stage 2 HL", use_container_width=True, type="primary" if st.session_state.wl_preset_filter == "STAGE2_HL" else "secondary"):
         st.session_state.wl_preset_filter = "STAGE2_HL"; persist_ui_state(); st.rerun()
-      if wf2.button("🔔 150MA Radar", use_container_width=True, type="primary" if st.session_state.wl_preset_filter == "REV150" else "secondary"):
+      if wf2.button("150MA Radar", use_container_width=True, type="primary" if st.session_state.wl_preset_filter == "REV150" else "secondary"):
         st.session_state.wl_preset_filter = "REV150"; persist_ui_state(); st.rerun()
-      if wf3.button("🔥 Momentum", use_container_width=True, type="primary" if st.session_state.wl_preset_filter == "MOMENTUM" else "secondary"):
+      if wf3.button("Momentum", use_container_width=True, type="primary" if st.session_state.wl_preset_filter == "MOMENTUM" else "secondary"):
         st.session_state.wl_preset_filter = "MOMENTUM"; persist_ui_state(); st.rerun()
-      if wf4.button("🟢 Buy Triggers", use_container_width=True, type="primary" if st.session_state.wl_preset_filter == "BUY" else "secondary"):
+      if wf4.button("Buy Triggers", use_container_width=True, type="primary" if st.session_state.wl_preset_filter == "BUY" else "secondary"):
         st.session_state.wl_preset_filter = "BUY"; persist_ui_state(); st.rerun()
-      if wf5.button("📐 TCT Bottoms", use_container_width=True, type="primary" if st.session_state.wl_preset_filter == "TCT" else "secondary"):
+      if wf5.button("TCT Bottoms", use_container_width=True, type="primary" if st.session_state.wl_preset_filter == "TCT" else "secondary"):
         st.session_state.wl_preset_filter = "TCT"; persist_ui_state(); st.rerun()
-      if wf6.button("🎯 Swings", use_container_width=True, type="primary" if st.session_state.wl_preset_filter == "SWING" else "secondary"):
+      if wf6.button("Swings", use_container_width=True, type="primary" if st.session_state.wl_preset_filter == "SWING" else "secondary"):
         st.session_state.wl_preset_filter = "SWING"; persist_ui_state(); st.rerun()
-      if wf7.button("🔴 <150MA Cut", use_container_width=True, type="primary" if st.session_state.wl_preset_filter == "CUT150" else "secondary"):
+      if wf7.button("<150MA Cut", use_container_width=True, type="primary" if st.session_state.wl_preset_filter == "CUT150" else "secondary"):
         st.session_state.wl_preset_filter = "CUT150"; persist_ui_state(); st.rerun()
-      if wf8.button("📋 Show All", use_container_width=True, type="primary" if st.session_state.wl_preset_filter == "ALL" else "secondary"):
+      if wf8.button("Show All", use_container_width=True, type="primary" if st.session_state.wl_preset_filter == "ALL" else "secondary"):
         st.session_state.wl_preset_filter = "ALL"; persist_ui_state(); st.rerun()
       pills_html = "".join([f'<a href="?inspect={s}" target="_self" class="pill">{i+1}. {s}</a>' for i, s in enumerate(symbols)])
       st.markdown(f"<div style='margin:8px 0;'>{pills_html}</div>", unsafe_allow_html=True)
@@ -2323,13 +2361,13 @@ ${m['Price']:,.2f} · <span style="color:{'#15803d' if m['Change']>=0 else '#b91
       elif sort_by == "Alphabetical (A → Z)":
         display_symbols = sorted(display_symbols)
       if not display_symbols:
-        st.info("No stocks matched that filter in this folder. Tap '📋 Show All' above to reset.")
+        st.info("No stocks matched that filter in this folder. Tap 'Show All' above to reset.")
       left_c, right_c = st.columns(2)
       for idx, sym in enumerate(display_symbols):
         d = data_dict[sym]
         arr_w = "▲ +" if d["Change"] >= 0 else "▼ -"
         if d["RS_Leader"]:
-          rs_html = f'<span class="badge badge-rs-lead" style="margin-left:4px;">🔥 Leading S&P ({d["RS_Diff"]:+.1f}%)</span>'
+          rs_html = f'<span class="badge badge-rs-lead" style="margin-left:4px;">Leading S&P ({d["RS_Diff"]:+.1f}%)</span>'
         else:
           rs_html = f'<span class="badge badge-rs-lag" style="margin-left:4px;">RS {d["RS_Diff"]:+.1f}%</span>'
         earn_html = ""
@@ -2338,7 +2376,7 @@ ${m['Price']:,.2f} · <span style="color:{'#15803d' if m['Change']>=0 else '#b91
           if days_left <= 14:
             earn_html = (
               f'<div style="margin-top:6px;"><span class="badge badge-earn-warn">'
-              f'⚠️ EARNINGS IN {days_left}d ({dt_s}) — WATCH CATALYST RISK'
+              f'EARNINGS IN {days_left}d ({dt_s}) — WATCH CATALYST RISK'
               f'</span></div>'
             )
         chg_clr = "#15803d" if d["Change"] >= 0 else "#b91c1c"
@@ -2346,7 +2384,7 @@ ${m['Price']:,.2f} · <span style="color:{'#15803d' if m['Change']>=0 else '#b91
           st.markdown(
             f'<div class="stock-card">'
             f'<div style="display:flex;justify-content:space-between;align-items:flex-start;">'
-            f'<div><a href="?inspect={d["Ticker"]}" target="_self" class="ticker-link">📊 {d["Ticker"]}</a>'
+            f'<div><a href="?inspect={d["Ticker"]}" target="_self" class="ticker-link">{d["Ticker"]}</a>'
             f'<span class="badge {d["TCT_Badge"]}" style="margin-left:8px;">{d["TCT_Action"]}</span>'
             f'{rs_html}{earn_html}'
             f'<div style="font-size:1.35rem;font-weight:700;margin-top:6px;">'
@@ -2359,13 +2397,13 @@ ${m['Price']:,.2f} · <span style="color:{'#15803d' if m['Change']>=0 else '#b91
             f'</div></div>'
             f'<div class="trade-ticket">'
             f'<div style="display:flex;justify-content:space-between;font-weight:700;color:#0f291e;margin-bottom:4px;">'
-            f'<span>{d["TCT_Model"]}</span><span>📐 Reward/Risk: {d["R_Multiple"]:.1f}R</span></div>'
+            f'<span>{d["TCT_Model"]}</span><span>Reward/Risk: {d["R_Multiple"]:.1f}R</span></div>'
             f'<div style="display:flex;justify-content:space-between;">'
-            f'<span>🎯 <b>Buy Trigger:</b> ${d["BOS_Level"]:,.2f}</span>'
-            f'<span>🟢 <b>Take Profit:</b> <span style="color:#15803d;font-weight:700;">'
+            f'<span><b>Buy Trigger:</b> ${d["BOS_Level"]:,.2f}</span>'
+            f'<span><b>Take Profit:</b> <span style="color:#15803d;font-weight:700;">'
             f'${d["Target_Price"]:,.2f}</span> (+{d["Target_Pct"]:.1f}%)</span></div>'
             f'<div style="margin-top:4px;display:flex;justify-content:space-between;">'
-            f'<span>🔴 <b>Stop-Loss:</b> <span style="color:#b91c1c;font-weight:700;">'
+            f'<span><b>Stop-Loss:</b> <span style="color:#b91c1c;font-weight:700;">'
             f'${d["Stop_Price"]:,.2f}</span> ({d["Stop_Pct"]:.1f}%)</span>'
             f'<span><b>0.5% Size:</b> {d["Shares_05Pct"]} shs (${d["Pos_Value"]:,.0f})</span></div></div>'
             f'<div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;font-size:0.78rem;color:#52525b;">'
@@ -2413,16 +2451,16 @@ ${m['Price']:,.2f} · <span style="color:{'#15803d' if m['Change']>=0 else '#b91
               f'<div style="font-size:0.76rem;color:#71717a;text-transform:uppercase;font-weight:700;">{title}</div>'
               f'<span class="badge {m["TCT_Badge"]}">{m["TCT_Action"]}</span></div>'
               f'<div style="display:flex;justify-content:space-between;align-items:baseline;margin-top:6px;">'
-              f'<div><a href="?inspect={sym}" target="_self" class="ticker-link">📊 {sym}</a>'
+              f'<div><a href="?inspect={sym}" target="_self" class="ticker-link">{sym}</a>'
               f'<span style="font-size:1.45rem;font-weight:700;color:#0f291e;margin-left:10px;">${m["Price"]:,.{decimals}f}</span>'
               f'<span style="font-size:0.92rem;color:{"#15803d" if m["Change"]>=0 else "#b91c1c"}; font-weight: 700; margin-left: 6px;">'
               f'{arr_m}${abs(m["Change"]):.{decimals}f} ({m["Change_Pct"]:+.2f}%)</span></div>'
               f'<span class="badge {m["Badge"]}">{m["State"]}</span></div>'
               f'<div class="trade-ticket"><div style="display:flex;justify-content:space-between;">'
-              f'<span>🎯 <b>Buy Trigger:</b> ${m["BOS_Level"]:,.{decimals}f}</span><span>📐 <b>Reward/Risk:</b> {m["R_Multiple"]:.1f}R</span></div>'
+              f'<span><b>Buy Trigger:</b> ${m["BOS_Level"]:,.{decimals}f}</span><span><b>Reward/Risk:</b> {m["R_Multiple"]:.1f}R</span></div>'
               f'<div style="display:flex;justify-content:space-between;margin-top:3px;">'
-              f'<span>🟢 <b>Target:</b> <b style="color:#15803d;">${m["Target_Price"]:,.{decimals}f}</b> (+{m["Target_Pct"]:.1f}%)</span>'
-              f'<span>🔴 <b>Stop:</b> <b style="color:#b91c1c;">${m["Stop_Price"]:,.{decimals}f}</b> ({m["Stop_Pct"]:.1f}%)</span></div></div>'
+              f'<span><b>Target:</b> <b style="color:#15803d;">${m["Target_Price"]:,.{decimals}f}</b> (+{m["Target_Pct"]:.1f}%)</span>'
+              f'<span><b>Stop:</b> <b style="color:#b91c1c;">${m["Stop_Price"]:,.{decimals}f}</b> ({m["Stop_Pct"]:.1f}%)</span></div></div>'
               f'<div style="margin-top:8px;font-size:0.78rem;color:#52525b;display:flex;justify-content:space-between;">'
               f'<span>Day High: <b>${m["Day_High"]:,.{decimals}f}</b></span><span>Day Low: <b>${m["Day_Low"]:,.{decimals}f}</b></span>'
               f'<span>RSI: <b>{m["RSI"]:.1f}</b></span><span>EMA 50: <b>${m["EMA50_Val"]:,.{decimals}f}</b></span></div></div>',
@@ -2459,7 +2497,7 @@ ${m['Price']:,.2f} · <span style="color:{'#15803d' if m['Change']>=0 else '#b91
             {
               "Ticker": s,
               "Earnings Date": dt_str,
-              "Countdown": f"{days_left}d" + (" ⚠️" if days_left <= 7 else ""),
+              "Countdown": f"{days_left}d" + (" " if days_left <= 7 else ""),
               "_sort": days_left
             }
             for s, (days_left, dt_str) in earnings_map.items()
@@ -2487,21 +2525,21 @@ ${m['Price']:,.2f} · <span style="color:{'#15803d' if m['Change']>=0 else '#b91
     with s_col2:
       st.subheader("Push Notifications (Live & Daily Briefing)")
       current_data = fetch_batch_market_data(get_all_monitored_tickers(), account_size=settings["account_size"])
-      if st.button("🔔 Send Live 6-Playbook Briefing Ping to iPad Now", type="primary"):
+      if st.button("Send Live 6-Playbook Briefing Ping to iPad Now", type="primary"):
         st2_hl = [f"{k} (${v['Price']:.2f})" for k, v in current_data.items() if v.get("Is_Stage2_Higher_Low")]
         rev_150 = [f"{k} (${v['Price']:.2f} > 150MA ${v.get('SMA150_Val', v['Price']):.2f})" for k, v in current_data.items() if v.get("Is_150MA_Reversal_Radar")]
         buys = [f"{k} ({v['TCT_Short_Sig']} @ ${v['Price']:.2f} -> Tgt ${v['Target_Price']:.2f})" for k, v in current_data.items() if v["TCT_Priority"] == 0]
         tct_boxes = [f"{k} (BOS ${v['BOS_Level']:.2f})" for k, v in current_data.items() if v["TCT_Valid_Range"] and v["TCT_Priority"] != 0]
         sells = [f"{k} (${v['Price']:.2f})" for k, v in current_data.items() if v["TCT_Priority"] == 4]
         summary_msg = (
-          f"📈 STAGE 2 HIGHER LOW ({len(st2_hl)}): {', '.join(st2_hl[:6]) if st2_hl else 'None'}\n"
-          f"🔔 150-MA REVERSAL RADAR ({len(rev_150)}): {', '.join(rev_150[:6]) if rev_150 else 'None'}\n"
-          f"🟢 ALL BUY / SWING TRIGGERS ({len(buys)}): {', '.join(buys[:6]) if buys else 'None'}\n"
-          f"📐 In TCT Bottom Box ({len(tct_boxes)}): {', '.join(tct_boxes[:6]) if tct_boxes else 'None'}\n"
-          f"🔴 Below 150/50 MA Avoid ({len(sells)}): {', '.join(sells[:8]) if sells else 'None'}"
+          f"STAGE 2 HIGHER LOW ({len(st2_hl)}): {', '.join(st2_hl[:6]) if st2_hl else 'None'}\n"
+          f"150-MA REVERSAL RADAR ({len(rev_150)}): {', '.join(rev_150[:6]) if rev_150 else 'None'}\n"
+          f"ALL BUY / SWING TRIGGERS ({len(buys)}): {', '.join(buys[:6]) if buys else 'None'}\n"
+          f"In TCT Bottom Box ({len(tct_boxes)}): {', '.join(tct_boxes[:6]) if tct_boxes else 'None'}\n"
+          f"Below 150/50 MA Avoid ({len(sells)}): {', '.join(sells[:8]) if sells else 'None'}"
         )
         ok, status_msg = send_ntfy_alert(summary_msg, "Daily Portfolio Briefing")
-        st.success(f"✅ {status_msg}") if ok else st.error(f"❌ {status_msg}")
+        st.success(f"{status_msg}") if ok else st.error(f"{status_msg}")
       st.markdown("---")
       if current_data:
         df_export = pd.DataFrame([{
@@ -2515,9 +2553,70 @@ ${m['Price']:,.2f} · <span style="color:{'#15803d' if m['Change']>=0 else '#b91
         csv_bytes = df_export.to_csv(index=False).encode("utf-8")
         csv_fname = f"tct_swing_plan_{datetime.now().strftime('%Y%m%d_%H%M')}.csv"
         st.download_button(
-          "📥 Download Full 6-Playbook Plan CSV",
+          "Download Full 6-Playbook Plan CSV",
           csv_bytes,
           csv_fname,
           "text/csv",
           type="primary"
         )
+
+    st.markdown("---")
+    st.subheader("8-Playbook Strategy & Technical Parameter Reference Guide")
+    st.caption("Complete specification of the moving averages, volume multipliers, RSI thresholds, and stop/target formulas used across the dashboard.")
+    playbook_ref_df = pd.DataFrame([
+      {
+        "Playbook / Filter": "Playbook 1: TCT Bottom Box",
+        "Moving Averages Used": "150-SMA & 50-EMA context; 1H / 5D Swing High BOS",
+        "Entry / Trigger Criteria": "Decline >= 8% from 130D peak over >= 25 bars (slow decline); horizontal box height 3%-38% with >= 2 support taps within 1.5% and no close < 30% below box floor. Trigger: Break of Structure (BOS) with >= 2.0R.",
+        "Stop-Loss & Profit Target": "Stop: Tap 3 Low - 0.5x ATR(14) (capped 2%-7% below entry). Target: Box Range High."
+      },
+      {
+        "Playbook / Filter": "Playbook 2: 20D Momentum Breakout",
+        "Moving Averages Used": "50-Day EMA & 20-Day EMA",
+        "Entry / Trigger Criteria": "Close >= prior 20-Day High, Price > 50-Day EMA, and time-paced Relative Volume (RVOL) >= 1.25x 20-Day average volume.",
+        "Stop-Loss & Profit Target": "Stop: Max(min(20-EMA, Close - 1.5x ATR14), Close x 0.94). Target: Entry + 2.5R."
+      },
+      {
+        "Playbook / Filter": "Playbook 3: 20-EMA Pullback Swing",
+        "Moving Averages Used": "20-Day EMA & 50-Day EMA",
+        "Entry / Trigger Criteria": "Confirmed uptrend (Price > 50-EMA and 20-EMA > 50-EMA); Low or Close pulls back within 2.2% of 20-EMA and prints a bullish turn bar (Close >= Open or Close > Prev Close).",
+        "Stop-Loss & Profit Target": "Stop: Min(3-Day Low, 20-EMA) - 0.5x ATR14 (max 5% risk). Target: Max(20D High, Entry + 2.4R)."
+      },
+      {
+        "Playbook / Filter": "Playbook 4: Volatility Squeeze Coil",
+        "Moving Averages Used": "20-Day SMA (Bollinger Mid) & 50-Day EMA",
+        "Entry / Trigger Criteria": "Bollinger Band Width (20, 2) compresses within 18% of its 25-day low (volatility squeeze), Price > 50-EMA, and Close >= prior 3-Day High.",
+        "Stop-Loss & Profit Target": "Stop: 3-Day Low - 0.3x ATR14 (max 5% risk). Target: Entry + 2.8R."
+      },
+      {
+        "Playbook / Filter": "Playbook 5: RSI-2 Oversold Bounce",
+        "Moving Averages Used": "200-Day EMA & 20-Day EMA",
+        "Entry / Trigger Criteria": "Long-term uptrend intact (Price >= 96% of 200-EMA) with extreme short-term washout: 2-period Wilder RSI <= 18 or Low touches Lower Bollinger Band (20, 2).",
+        "Stop-Loss & Profit Target": "Stop: Close - 1.5x ATR14 (max 5.5% risk). Target: Max(20-EMA, Entry + 2.0R)."
+      },
+      {
+        "Playbook / Filter": "Playbook 6: High-Vol Gap Ignition",
+        "Moving Averages Used": "50-Day EMA",
+        "Entry / Trigger Criteria": "Day gain >= +3.2% above 50-EMA on time-paced RVOL >= 1.7x 20-Day average volume, closing in the top 45% of the daily candle range.",
+        "Stop-Loss & Profit Target": "Stop: Day Low - 0.2x ATR14 (max 6% risk). Target: Entry + 2.5R."
+      },
+      {
+        "Playbook / Filter": "Playbook 7: Stage 2 Higher Low",
+        "Moving Averages Used": "150-Day SMA, 50-Day EMA, 20-Day EMA, 5/10-Day SMA",
+        "Entry / Trigger Criteria": "Stage 2 Uptrend (Price > 150-SMA + 1.5%, 150-SMA rising vs 20 bars ago, 50-EMA >= 150-SMA); 12-day pullback low > prior 12-to-38 day low (Higher Low); pulls back from 20D high into 20/50-EMA zone and turns up (Close >= Open, Close > Prev Close, or 5-SMA >= 10-SMA).",
+        "Stop-Loss & Profit Target": "Stop: Max(min(12D Low - 0.35x ATR14, 150-SMA), Close x 0.935). Target: Max(20D High x 1.03, Entry + 2.5R)."
+      },
+      {
+        "Playbook / Filter": "Playbook 8: 150-MA Reversal Radar",
+        "Moving Averages Used": "150-Day SMA",
+        "Entry / Trigger Criteria": "Early Stage 2 trend reversal alert: Stock traded below its 150-Day SMA for >= 3 of the last 30 bars and just crossed back above the 150-Day SMA (within 7.5% above 150-SMA). Use for early research to watch for the next Stage 2 Higher Low.",
+        "Stop-Loss & Profit Target": "Stop: 150-SMA - 0.5x ATR14 (max 7% risk). Target: Entry + 2.5R."
+      },
+      {
+        "Playbook / Filter": "Filter: Pure Momentum Leaders",
+        "Moving Averages Used": "20-Day EMA, 50-Day EMA, 200-Day EMA",
+        "Entry / Trigger Criteria": "Price > 20-EMA, 50-EMA, and 200-EMA simultaneously; 63-Day Relative Strength vs S&P 500 >= +2.0% (RS Leader); and 14-Day RSI between 55 and 75.",
+        "Stop-Loss & Profit Target": "Follows active playbook stop or 20-Day EMA trailing stop."
+      }
+    ])
+    st.dataframe(playbook_ref_df, use_container_width=True, hide_index=True)
