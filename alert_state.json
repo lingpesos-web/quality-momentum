@@ -1,23 +1,23 @@
 {
-  "date": "2026-11-09",
+  "date": "2026-11-10",
   "alerted": [
-    "ADPT_BUY",
-    "AMAT_BUY",
-    "APP_BUY",
+    "APLD_BUY",
     "AVGO_BUY",
+    "CBRS_STOP",
     "COIN_STOP",
-    "GME_BUY",
+    "CRCL_STOP",
+    "CRDO_STOP",
+    "GLW_STOP",
     "GOOG_STOP",
     "HOOD_STOP",
+    "IONQ_BUY",
+    "IREN_STOP",
     "NVDA_STOP",
-    "QQQ_STOP",
-    "SLV_BUY",
+    "QUBT_STOP",
     "SNDK_STOP",
     "SOFI_BUY",
+    "SOXL_STOP",
     "SPCX_BUY",
-    "SPY_STOP",
-    "TMO_BUY",
-    "UGL_BUY",
-    "WDC_STOP"
+    "TEM_STOP"
   ]
 }
