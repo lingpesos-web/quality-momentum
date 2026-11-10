@@ -15,53 +15,39 @@
     "MRVL",
     "CLS",
     "CRCL",
-    "CRWD",
     "LITE",
     "ADPT",
-    "SPCX",
     "STX",
     "WDC",
-    "CRBS",
     "TEM",
     "IREN",
-    "AMD",
+    "CBRS",
+    "CDE",
+    "SOXL",
+    "IONQ",
     "QUBT",
+    "AMD",
     "APP",
     "COIN",
     "MSTR",
-    "NVDA",
     "CRDO",
-    "LYTE",
-    "GME",
-    "AMAT",
-    "QQQ",
-    "VOO",
-    "SPY",
-    "GOOG",
-    "KO"
+    "NVDA"
   ],
   "Opportunity Radar": [
     "PLTR",
     "MU",
     "HOOD",
     "LRCX",
-    "UGL",
     "SOFI",
     "MRVL",
     "AVGO",
-    "COST",
-    "MSFT",
-    "TMO",
-    "KO",
-    "GME"
+    "COST"
   ],
-  "Special Case Stocks": [],
-  "Active Positions": [
-    "ADPT",
-    "SPCH",
-    "TEM",
-    "VRT",
-    "PLTR",
-    "SOXL"
-  ]
+  "Special Case Stocks": [
+    "COIN",
+    "MSTR",
+    "SOXL",
+    "IONQ"
+  ],
+  "Active Positions": []
 }
