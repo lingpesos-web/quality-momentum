@@ -1,0 +1,53 @@
+{
+  "Active Portfolio": [
+    "VRT",
+    "COHR",
+    "SKHY",
+    "SNDK",
+    "MU",
+    "DRAM",
+    "HOOD",
+    "SOFI",
+    "PLTR",
+    "GLW",
+    "LRCX",
+    "MRVL",
+    "CLS",
+    "CRCL",
+    "LITE",
+    "ADPT",
+    "SPCX",
+    "STX",
+    "WDC",
+    "TEM",
+    "IREN",
+    "CBRS",
+    "CDE",
+    "SOXL",
+    "IONQ",
+    "QUBT",
+    "AMD",
+    "APP",
+    "COIN",
+    "MSTR",
+    "CRDO",
+    "NVDA"
+  ],
+  "Opportunity Radar": [
+    "PLTR",
+    "MU",
+    "HOOD",
+    "LRCX",
+    "SOFI",
+    "MRVL",
+    "AVGO",
+    "COST"
+  ],
+  "Special Case Stocks": [
+    "COIN",
+    "MSTR",
+    "SOXL",
+    "IONQ"
+  ],
+  "Active Positions": []
+}
