@@ -157,7 +157,7 @@ def send_ntfy_alert(message, title="Daily Portfolio Briefing"):
 st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,600;1,6..72,400&family=Inter:wght@400;500;600;700;800&display=swap');.stApp{background-color:#fbf9f4 !important;color:#1a1a1a !important;font-family:'Inter', sans-serif;}[data-testid="stSidebar"]{background-color:#0f291e !important;border-right:1px solid #1c3d2f;}[data-testid="stSidebar"] *{color:#e2e8f0 !important;}[data-testid="stSidebar"] .stRadio div[role="radiogroup"] > label{padding:8px 12px;border-radius:6px;margin-bottom:4px;transition:all 0.2s;}[data-testid="stSidebar"] .stRadio div[role="radiogroup"] > label:hover{background-color:#183d2e;}h1, h2, h3{font-family:'Newsreader', Georgia, serif !important;font-weight:600 !important;color:#0f291e !important;}.macro-container{display:flex;flex-wrap:nowrap;gap:8px;overflow-x:auto;padding-bottom:8px;margin-bottom:12px;}.macro-card{flex:1 1 0px;min-width:105px;background:#ffffff;border:1px solid #e7e2d9;border-radius:8px;padding:8px 6px;text-align:center;box-shadow:0 1px 2px rgba(0,0,0,0.02);}.macro-title{font-size:0.68rem;color:#71717a;text-transform:uppercase;font-weight:700;letter-spacing:0.04em;white-space:nowrap;}.macro-price{font-size:0.88rem;font-weight:700;color:#18181b;margin:2px 0;white-space:nowrap;}.tick-pos{color:#15803d;font-size:0.72rem;font-weight:600;white-space:nowrap;}.tick-neg{color:#b91c1c;font-size:0.72rem;font-weight:600;white-space:nowrap;}.stock-card{background:#ffffff;border:1px solid #e7e2d9;border-radius:10px;padding:16px;margin-bottom:14px;box-shadow:0 1px 4px rgba(0,0,0,0.03);}.ticker-link{font-size:1.25rem;font-weight:700;color:#0f291e !important;text-decoration:none !important;border-bottom:2px solid #c5a059;padding-bottom:1px;}.ticker-link:hover{color:#15803d !important;border-bottom-color:#15803d;background-color:#f0fdf4;border-radius:4px;padding:2px 6px;}.hero-ticker-link{font-size:1.85rem;font-weight:700;color:#ffffff !important;text-decoration:none !important;border-bottom:2px dashed #c5a059;padding-bottom:2px;}.badge{display:inline-block;padding:2px 8px;border-radius:4px;font-size:0.68rem;font-weight:600;text-transform:uppercase;}.badge-breakout{background:#dcfce7;color:#15803d;}.badge-trend{background:#dbeafe;color:#1d4ed8;}.badge-candidate{background:#fef9c3;color:#a16207;}.badge-caution{background:#fee2e2;color:#b91c1c;}.badge-tct-buy{background:#15803d;color:#ffffff;}.badge-tct-watch{background:#fef08a;color:#854d0e;border:1px solid #fde047;}.badge-tct-sell{background:#b91c1c;color:#ffffff;}.badge-rs-lead{background:#ecfdf5;color:#047857;border:1px solid #a7f3d0;}.badge-rs-lag{background:#f4f4f5;color:#71717a;}.badge-earn-warn{background:#ffedd5;color:#c2410c;border:1px solid #fdba74;font-weight:700;}.pill{display:inline-flex;align-items:center;background:#e9e4db;color:#0f291e !important;text-decoration:none !important;padding:4px 10px;border-radius:14px;font-size:0.8rem;font-weight:600;margin-right:6px;margin-bottom:6px;}.pill:hover{background:#d6cfc2;}.scroll-news-box{max-height:540px;overflow-y:auto;padding-right:6px;}.ticker-news-badge{background:#dcfce7;color:#15803d;padding:2px 6px;border-radius:4px;font-weight:700;font-size:0.7rem;margin-right:6px;}.age-badge{background:#f1f5f9;color:#334155;padding:2px 6px;border-radius:4px;font-weight:600;font-size:0.68rem;margin-left:6px;}.trade-ticket{background:#f8f6f0;border:1px solid #e2ddd2;border-radius:8px;padding:10px 12px;margin-top:10px;font-size:0.80rem;}/* LARGE-FONT 2-COLUMN LIVE WATCHBOARD TABLE */
-.live-board-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;width:100%;margin-top:4px;}@media (max-width:900px){.live-board-grid{grid-template-columns:1fr;}}.live-quote-table{width:100%;border-collapse:collapse;background:#ffffff;border:1px solid #d4cec3;border-radius:6px;overflow:hidden;font-size:1.12rem;table-layout:auto;}.live-quote-table thead th{background:#0f291e;color:#f4efe6;font-weight:700;font-size:0.82rem;text-transform:uppercase;letter-spacing:0.02em;padding:6px 5px;text-align:right;white-space:nowrap;}.live-quote-table thead th:nth-child(1), .live-quote-table thead th:nth-child(2){text-align:left;}.live-quote-table tbody tr{border-bottom:1px solid #eae5dc;line-height:1.25;}.live-quote-table tbody tr:nth-child(even){background-color:#faf8f5;}.live-quote-table tbody tr:hover{background-color:#ecfdf5;}.live-quote-table td{padding:5px 5px;text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums;}.live-quote-table td:nth-child(1){text-align:left;font-size:0.92rem;font-weight:700;padding-left:6px;padding-right:4px;}.live-quote-table td:nth-child(2){text-align:left;font-weight:800;padding-left:4px;padding-right:4px;}.rt-sym-link{color:#0f291e !important;text-decoration:none !important;font-weight:800;font-size:1.18rem;border-bottom:2px solid #c5a059;}.rt-sym-link:hover{color:#15803d !important;background:#dcfce7;padding:1px 4px;border-radius:3px;}.rt-dossier-link{text-decoration:none !important;font-size:0.75rem;margin-left:5px;color:#0f291e !important;font-weight:700;opacity:0.75;}[data-testid="stToolbarActions"],[data-testid="stActionButtonIcon"],[data-testid="stHeaderActionElements"],[data-testid="manage-app-button"],[data-testid="stMainMenu"],.stDeployButton,.stAppDeployButton,header a[href*="github.com"],div[class*="viewerBadge"],a[class*="viewerBadge"],div[class*="StatusWidget"]{display:none !important;visibility:hidden !important;}</style>
+.live-board-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;width:100%;margin-top:4px;}@media (max-width:900px){.live-board-grid{grid-template-columns:1fr;}}.live-quote-table{width:100%;border-collapse:collapse;background:#ffffff;border:1px solid #d4cec3;border-radius:6px;overflow:hidden;font-size:1.12rem;table-layout:auto;}.live-quote-table thead th{background:#0f291e;color:#f4efe6;font-weight:700;font-size:0.82rem;text-transform:uppercase;letter-spacing:0.02em;padding:6px 5px;text-align:right;white-space:nowrap;}.live-quote-table thead th:nth-child(1), .live-quote-table thead th:nth-child(2){text-align:left;}.live-quote-table tbody tr{border-bottom:1px solid #eae5dc;line-height:1.25;}.live-quote-table tbody tr:nth-child(even){background-color:#faf8f5;}.live-quote-table tbody tr:hover{background-color:#ecfdf5;}.live-quote-table td{padding:5px 5px;text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums;}.live-quote-table td:nth-child(1){text-align:left;font-size:0.92rem;font-weight:700;padding-left:6px;padding-right:4px;}.live-quote-table td:nth-child(2){text-align:left;font-weight:800;padding-left:4px;padding-right:4px;}.rt-sym-link{color:#0f291e !important;text-decoration:none !important;font-weight:800;font-size:1.18rem;border-bottom:2px solid #c5a059;}.rt-sym-link:hover{color:#15803d !important;background:#dcfce7;padding:1px 4px;border-radius:3px;}.rt-price-link{text-decoration:none !important;font-weight:800;border-bottom:1px dashed rgba(15,41,30,0.35);padding-bottom:1px;}.rt-price-link:hover{background:#dcfce7;padding:1px 4px;border-radius:3px;}[data-testid="InputInstructions"]{display:none !important;}[data-testid="stToolbarActions"],[data-testid="stActionButtonIcon"],[data-testid="stHeaderActionElements"],[data-testid="manage-app-button"],[data-testid="stMainMenu"],.stDeployButton,.stAppDeployButton,header a[href*="github.com"],div[class*="viewerBadge"],a[class*="viewerBadge"],div[class*="StatusWidget"]{display:none !important;visibility:hidden !important;}</style>
 """, unsafe_allow_html=True)
 
 # --- WATCHLISTS & GITHUB AUTO-SYNC ---
@@ -610,45 +610,45 @@ def analyze_six_playbooks(df, account_size=100000, spy_ret_63d=0.0, df_1h=None):
   stop_loss_pct = ((effective_stop - entry_ref) / entry_ref) * 100.0
   crossed_5d = (curr_close >= high_5d_prev) and (prev_close < high_5d_prev)
   if tct_valid_range and curr_close >= bos_level and r_multiple >= 1.9:
-    act, badge, dot, short_s, prio = "BUY NOW (TCT BOS)", "badge-tct-buy", "[BUY]", "Buy Now", 0
+    act, badge, dot, short_s, sig_clr, prio = "BUY NOW (TCT BOS)", "badge-tct-buy", "🟢", "🟢 Buy Now", "#15803d", 0
     expl = f"TCT accumulation breakout above BOS (${bos_level:,.2f}) targeting Range High (${target_price:,.2f})."
   elif is_stage2_higher_low:
-    act, badge, dot, short_s, prio = "STAGE 2 HIGHER LOW", "badge-tct-buy", "[S2]", "Stage 2 HL", 0
+    act, badge, dot, short_s, sig_clr, prio = "STAGE 2 HIGHER LOW", "badge-tct-buy", "📈", "📈 Stage 2 HL", "#15803d", 0
     expl = f"Stage 2 Higher Low: Uptrend above rising 150-MA (${sma150:,.2f}), Higher Low at ${recent_pb_low:,.2f} > prior low (${prior_pb_low:,.2f})."
   elif is_20d_breakout or is_gap_ignition:
-    act, badge, dot, short_s, prio = "BUY NOW (BREAKOUT)", "badge-tct-buy", "[BUY]", "Buy Now", 0
+    act, badge, dot, short_s, sig_clr, prio = "BUY NOW (BREAKOUT)", "badge-tct-buy", "🟢", "🟢 Buy Now", "#15803d", 0
     expl = f"{playbook_name}: Breakout above ${bos_level:,.2f} on {paced_rvol:.1f}x pace volume."
   elif is_squeeze_breakout or is_holy_grail_pullback:
-    act, badge, dot, short_s, prio = "SWING BUY (PULLBACK/COIL)", "badge-tct-buy", "[SWG]", "Swing Buy", 0
+    act, badge, dot, short_s, sig_clr, prio = "SWING BUY (PULLBACK/COIL)", "badge-tct-buy", "🎯", "🎯 Swing Buy", "#059669", 0
     expl = f"{playbook_name}: High-probability swing entry near ${entry_ref:,.2f}, stop ${effective_stop:,.2f}."
   elif is_150ma_reversal_radar:
-    act, badge, dot, short_s, prio = "150-MA REVERSAL (RESEARCH)", "badge-tct-watch", "[150]", "150MA Radar", 1
+    act, badge, dot, short_s, sig_clr, prio = "150-MA REVERSAL (RESEARCH)", "badge-tct-watch", "🔔", "🔔 150MA Radar", "#b45309", 1
     expl = f"Reclaimed 150-Day MA (${sma150:,.2f}). Early trend reversal radar — monitor for Stage 2 Higher Low."
   elif is_rsi2_snapback:
-    act, badge, dot, short_s, prio = "SWING BUY (OVERSOLD)", "badge-tct-watch", "[OVR]", "Oversold", 1
+    act, badge, dot, short_s, sig_clr, prio = "SWING BUY (OVERSOLD)", "badge-tct-watch", "🪃", "🪃 Oversold", "#b45309", 1
     expl = f"RSI-2 extreme oversold ({rsi2:.0f}) above 200-EMA. Target bounce to ${target_price:,.2f}."
   elif tct_valid_range and curr_close < bos_level:
-    act, badge, dot, short_s, prio = "WATCHING TCT BOX", "badge-tct-watch", "[TCT]", "TCT Box", 1
+    act, badge, dot, short_s, sig_clr, prio = "WATCHING TCT BOX", "badge-tct-watch", "📐", "📐 TCT Box", "#854d0e", 1
     expl = f"Valid 25+ bar TCT bottom box formed. Buy if price closes above BOS ${bos_level:,.2f}."
   elif is_pure_momentum:
-    act, badge, dot, short_s, prio = "MOMENTUM LEADER", "badge-rs-lead", "[MOM]", "Momentum", 2
+    act, badge, dot, short_s, sig_clr, prio = "MOMENTUM LEADER", "badge-rs-lead", "🔥", "🔥 Momentum", "#047857", 2
     expl = f"Strong institutional momentum leader (RS+, Price>20/50/200 EMA). Trailing stop ${effective_stop:,.2f}."
   elif curr_close > ema50 and (curr_close >= ema20 * 0.99 or crossed_5d):
-    act, badge, dot, short_s, prio = "HOLD / BUY DIP", "badge-trend", "[UP]", "Uptrend", 2
+    act, badge, dot, short_s, sig_clr, prio = "HOLD / BUY DIP", "badge-trend", "🔵", "🔵 Uptrend", "#1d4ed8", 2
     expl = f"Strong uptrend above 20 & 50 EMA. Swing target ${target_price:,.2f}, stop ${effective_stop:,.2f}."
   elif below_sma150 and not tct_valid_range and not is_rsi2_snapback:
-    act, badge, dot, short_s, prio = "BROKE 150-MA (CUT LOSS)", "badge-tct-sell", "[CUT]", "Below 150MA", 4
+    act, badge, dot, short_s, sig_clr, prio = "BROKE 150-MA (CUT LOSS)", "badge-tct-sell", "🔴", "🔴 Below 150MA", "#b91c1c", 4
     expl = f"Stage 4 Warning: Below 150-day MA (${sma150:,.2f}). Cut loss / avoid until price reclaims 150-MA."
   elif curr_close < ema50 and not tct_valid_range and not is_rsi2_snapback:
-    act, badge, dot, short_s, prio = "SELL / AVOID", "badge-tct-sell", "[AVD]", "Below 50MA", 4
+    act, badge, dot, short_s, sig_clr, prio = "SELL / AVOID", "badge-tct-sell", "🔴", "🔴 Below 50", "#b91c1c", 4
     expl = f"Below 50-day EMA (${ema50:,.2f}) without a valid TCT bottom box. Protect capital."
   else:
-    act, badge, dot, short_s, prio = "WAIT FOR TRIGGER", "badge-candidate", "[WAIT]", "Wait", 3
+    act, badge, dot, short_s, sig_clr, prio = "WAIT FOR TRIGGER", "badge-candidate", "🟡", "🟡 Wait", "#a16207", 3
     expl = f"Consolidating. Wait for a clean move above ${bos_level:,.2f} before entering."
   return {
     "TCT_Valid_Range": tct_valid_range, "TCT_Model": playbook_name, "Playbook_Cat": playbook_cat,
     "TCT_Slow_25": slow_decline_25, "TCT_Liq_50M": liq_pass, "TCT_2R_Pass": bool(r_multiple >= 2.0),
-    "TCT_Action": act, "TCT_Badge": badge, "TCT_Dot": dot, "TCT_Short_Sig": short_s,
+    "TCT_Action": act, "TCT_Badge": badge, "TCT_Dot": dot, "TCT_Short_Sig": short_s, "TCT_Sig_Color": sig_clr,
     "TCT_Explain": expl, "TCT_Priority": prio, "BOS_Entry": entry_ref, "BOS_Level": bos_level,
     "Target_Price": target_price, "Stop_Price": effective_stop, "R_Multiple": r_multiple,
     "Target_Pct": target_gain_pct, "Stop_Pct": stop_loss_pct, "Shares_05Pct": suggested_shares,
@@ -1029,7 +1029,10 @@ def render_watchlist_reorder_panel(folder_name, key_prefix="wl"):
   with c_top3:
     if st.button("Save & Sync Order to GitHub", type="primary", use_container_width=True, key=f"{key_prefix}_sync_gh"):
       ok, msg = sync_file_to_github(watchlists, DATA_FILE)
-      st.success(msg) if ok else st.warning(msg)
+      if ok:
+        st.success(msg)
+      else:
+        st.warning(msg)
   syms = watchlists.get(folder_name, [])
   if not syms:
     st.info("This watchlist is currently empty. Add a stock symbol above!")
@@ -1910,11 +1913,26 @@ TODAY'S STANDOUT SETUP · {best_pick['TCT_Action']} · {best_pick['TCT_Model']}
       auto_refresh_choice = st.selectbox("Auto-Refresh Timer", ["Auto: Off", "Auto: 15s", "Auto: 30s", "Auto: 60s"], index=3, label_visibility="collapsed")
     with ctrl5:
       if selected_live_folder != "All Watchlists Combined" and selected_live_folder != "Active Positions":
-        quick_add = st.text_input("Quick Add Ticker", placeholder=f"+ Add to {selected_live_folder}", label_visibility="collapsed").upper().strip()
-        if quick_add and quick_add not in watchlists[selected_live_folder]:
-          watchlists[selected_live_folder].append(quick_add)
-          sync_file_to_github(watchlists, DATA_FILE)
-          st.rerun()
+        lv_add_key = f"lv_qadd_{selected_live_folder}"
+        def _commit_lv_add():
+          raw_v = st.session_state.get(lv_add_key, "").upper().strip()
+          if raw_v:
+            added_any = False
+            for tk in [x.strip() for x in raw_v.replace(",", " ").split() if x.strip()]:
+              if tk not in watchlists[selected_live_folder]:
+                watchlists[selected_live_folder].append(tk)
+                added_any = True
+            if added_any:
+              sync_file_to_github(watchlists, DATA_FILE)
+              st.toast(f"Added {raw_v} to {selected_live_folder}")
+            st.session_state[lv_add_key] = ""
+        st.text_input(
+          "Quick Add Ticker",
+          placeholder=f"+ Add to {selected_live_folder}",
+          label_visibility="collapsed",
+          key=lv_add_key,
+          on_change=_commit_lv_add
+        )
       else:
         st.caption("All Combined Lists" if selected_live_folder == "All Watchlists Combined" else "Managed via Watchlist Tab")
     with ctrl6:
@@ -1989,8 +2007,8 @@ TODAY'S STANDOUT SETUP · {best_pick['TCT_Action']} · {best_pick['TCT_Model']}
             rows_html += (
               f'<tr>'
               f'<td>{rule_status}</td>'
-              f'<td><a href="?rt_chart={sym}" target="_self" class="rt-sym-link">{sym}</a></td>'
-              f'<td style="font-weight:800;">{arrow} ${price:,.2f} <span style="font-size:0.75rem;font-weight:600;color:{"#15803d" if d["Change"]>=0 else "#b91c1c"};">({d["Change_Pct"]:+.2f}%)</span></td>'
+              f'<td><a href="?inspect={sym}" target="_self" class="rt-sym-link" title="Open Full Dossier">{sym}</a></td>'
+              f'<td style="font-weight:800;"><a href="?rt_chart={sym}" target="_self" class="rt-price-link" style="color:{"#15803d" if d["Change"]>=0 else "#b91c1c"};" title="Tap to open live streaming chart below">{arrow} ${price:,.2f}</a> <span style="font-size:0.75rem;font-weight:600;color:{"#15803d" if d["Change"]>=0 else "#b91c1c"};">({d["Change_Pct"]:+.2f}%)</span></td>'
               f'<td>${bp:,.2f} <span style="font-size:0.75rem;color:#71717a;">({shares} shs)</span></td>'
               f'<td style="color:{clr};font-weight:800;">{sign}${pnl:,.2f} ({sign}{pnl_pct:.2f}%)</td>'
               f'<td style="color:#b91c1c;font-weight:700;">${p["StopLoss"]:,.2f}</td>'
@@ -2015,13 +2033,13 @@ TODAY'S STANDOUT SETUP · {best_pick['TCT_Action']} · {best_pick['TCT_Model']}
             color = "#15803d" if chg >= 0 else "#b91c1c"
             arrow = "▲" if chg >= 0 else "▼"
             sign = "+" if chg >= 0 else "-"
-            short_sig = d.get("TCT_Short_Sig", "Uptrend")
+            short_sig = d.get("TCT_Short_Sig", "🔵 Uptrend")
+            sig_clr = d.get("TCT_Sig_Color", "#1d4ed8")
             rows_html += (
               f'<tr>'
-              f'<td>{short_sig}</td>'
-              f'<td><a href="?rt_chart={sym}" target="_self" class="rt-sym-link" title="Tap to open live chart below">{sym}</a>'
-              f'<a href="?inspect={sym}" target="_self" class="rt-dossier-link" title="Open Full TCT Dossier">[Dossier]</a></td>'
-              f'<td style="font-weight:800;color:{color};">{arrow} {d["Price"]:,.2f}</td>'
+              f'<td style="color:{sig_clr};font-weight:800;">{short_sig}</td>'
+              f'<td><a href="?inspect={sym}" target="_self" class="rt-sym-link" title="Open Full Dossier">{sym}</a></td>'
+              f'<td style="font-weight:800;color:{color};"><a href="?rt_chart={sym}" target="_self" class="rt-price-link" style="color:{color};" title="Tap to open live streaming chart below">{arrow} {d["Price"]:,.2f}</a></td>'
               f'<td style="color:{color};font-weight:700;">{sign}{abs(chg):.2f} ({pct:+.2f}%)</td>'
               f'<td style="color:#15803d;font-weight:600;">{d["Day_High"]:,.2f}</td>'
               f'<td style="color:#b91c1c;font-weight:600;">{d["Day_Low"]:,.2f}</td>'
@@ -2034,7 +2052,7 @@ TODAY'S STANDOUT SETUP · {best_pick['TCT_Action']} · {best_pick['TCT_Model']}
           right_table_html = build_half_table_html(ordered_syms[mid:]) if ordered_syms[mid:] else ""
           st.markdown(f'<div class="live-board-grid"><div>{left_table_html}</div><div>{right_table_html}</div></div>', unsafe_allow_html=True)
           timer_status = f"Auto-refreshing every {run_every_sec}s (Instant ntfy Active)" if run_every_sec else "Manual refresh mode"
-          st.caption(f"Momentum · Buy Now · Swing Buy · Oversold · TCT Box · Uptrend  |  **Tap Symbol** for Bottom Live Chart · Tap **** for Dossier  |  *{timer_status} · Last updated: {datetime.now().strftime('%H:%M:%S')}*")
+          st.caption(f"🔥 Momentum · 📈 Stage 2 HL · 🟢 Buy Now · 🎯 Swing Buy · 🔔 150MA Radar · 🪃 Oversold · 📐 TCT Box · 🔵 Uptrend  |  **Tap Symbol** for Full Dossier · **Tap Price** for Bottom Live Chart  |  *{timer_status} · Last updated: {datetime.now().strftime('%H:%M:%S')}*")
         else:
           st.info("No symbols found in this watchlist.")
       else:
@@ -2091,7 +2109,7 @@ TODAY'S STANDOUT SETUP · {best_pick['TCT_Action']} · {best_pick['TCT_Model']}
                 f'</script></div>',
                 height=wh + 16
               )
-          pills_b = "".join([f'<a href="?rt_chart={s}" target="_self" class="pill" title="Open Bottom Live Chart">{live_records[s]["TCT_Dot"] if s in live_records else ""} {s}</a>' for s in tv_all_syms])
+          pills_b = "".join([f'<a href="?rt_chart={s}" target="_self" class="pill" title="Open Bottom Live Chart">{live_records[s]["TCT_Dot"] if s in live_records else "📈"} {s}</a>' for s in tv_all_syms])
           st.markdown(f"<div style='margin-top:4px;'><b>Tap any symbol to open Bottom Live Chart:</b><br>{pills_b}</div>", unsafe_allow_html=True)
     if run_every_sec and hasattr(st, "fragment"):
       @st.fragment(run_every=run_every_sec)
@@ -2290,13 +2308,29 @@ ${m['Price']:,.2f} · <span style="color:{'#15803d' if m['Change']>=0 else '#b91
       col_add, col_sort, col_ed = st.columns([2.6, 2.2, 1.2])
       with col_add:
         c_in, c_btn = st.columns([3, 1])
-        new_sym = c_in.text_input("Add symbol to folder", placeholder=f"Add to {folder} (e.g. AVGO)", label_visibility="collapsed").upper().strip()
-        if c_btn.button("+ Add") and new_sym:
-          if new_sym not in symbols:
-            watchlists[folder].append(new_sym)
-            sync_file_to_github(watchlists, DATA_FILE)
-            st.toast("Added")
-            st.rerun()
+        wl_in_key = f"wl_add_in_{folder}"
+        def _commit_wl_add():
+          raw_s = st.session_state.get(wl_in_key, "").upper().strip()
+          if raw_s:
+            added_any = False
+            for tk in [x.strip() for x in raw_s.replace(",", " ").split() if x.strip()]:
+              if tk not in watchlists[folder]:
+                watchlists[folder].append(tk)
+                added_any = True
+            if added_any:
+              sync_file_to_github(watchlists, DATA_FILE)
+              st.toast(f"Added {raw_s} to {folder}")
+            st.session_state[wl_in_key] = ""
+        c_in.text_input(
+          "Add symbol to folder",
+          placeholder=f"Add to {folder} (e.g. AVGO)",
+          label_visibility="collapsed",
+          key=wl_in_key,
+          on_change=_commit_wl_add
+        )
+        if c_btn.button("+ Add", use_container_width=True):
+          _commit_wl_add()
+          st.rerun()
       with col_sort:
         sort_by = st.selectbox(
           "Sort By",
@@ -2525,7 +2559,7 @@ ${m['Price']:,.2f} · <span style="color:{'#15803d' if m['Change']>=0 else '#b91
     with s_col2:
       st.subheader("Push Notifications (Live & Daily Briefing)")
       current_data = fetch_batch_market_data(get_all_monitored_tickers(), account_size=settings["account_size"])
-      if st.button("Send Live 6-Playbook Briefing Ping to iPad Now", type="primary"):
+      if st.button("Send Live 8-Playbook Briefing Ping to iPad Now", type="primary"):
         st2_hl = [f"{k} (${v['Price']:.2f})" for k, v in current_data.items() if v.get("Is_Stage2_Higher_Low")]
         rev_150 = [f"{k} (${v['Price']:.2f} > 150MA ${v.get('SMA150_Val', v['Price']):.2f})" for k, v in current_data.items() if v.get("Is_150MA_Reversal_Radar")]
         buys = [f"{k} ({v['TCT_Short_Sig']} @ ${v['Price']:.2f} -> Tgt ${v['Target_Price']:.2f})" for k, v in current_data.items() if v["TCT_Priority"] == 0]
@@ -2539,7 +2573,10 @@ ${m['Price']:,.2f} · <span style="color:{'#15803d' if m['Change']>=0 else '#b91
           f"Below 150/50 MA Avoid ({len(sells)}): {', '.join(sells[:8]) if sells else 'None'}"
         )
         ok, status_msg = send_ntfy_alert(summary_msg, "Daily Portfolio Briefing")
-        st.success(f"{status_msg}") if ok else st.error(f"{status_msg}")
+        if ok:
+          st.success(f"{status_msg}")
+        else:
+          st.error(f"{status_msg}")
       st.markdown("---")
       if current_data:
         df_export = pd.DataFrame([{
@@ -2553,7 +2590,7 @@ ${m['Price']:,.2f} · <span style="color:{'#15803d' if m['Change']>=0 else '#b91
         csv_bytes = df_export.to_csv(index=False).encode("utf-8")
         csv_fname = f"tct_swing_plan_{datetime.now().strftime('%Y%m%d_%H%M')}.csv"
         st.download_button(
-          "Download Full 6-Playbook Plan CSV",
+          "Download Full 8-Playbook Plan CSV",
           csv_bytes,
           csv_fname,
           "text/csv",
