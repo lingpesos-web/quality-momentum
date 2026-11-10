@@ -662,6 +662,12 @@ def analyze_six_playbooks(df, account_size=100000, spy_ret_63d=0.0, df_1h=None):
   risk_per_share = max(entry_ref - effective_stop, 0.0001)
   reward_per_share = max(target_price - entry_ref, 0.0)
   r_multiple = reward_per_share / risk_per_share
+  bos_2d = round(float(bos_level), 2)
+  tgt_2d = round(float(target_price), 2)
+  stp_2d = round(float(effective_stop), 2)
+  pot_reward = max(tgt_2d - bos_2d, 0.0)
+  pot_risk = max(bos_2d - stp_2d, 0.01)
+  potential_rr = int(((pot_reward / pot_risk) + 1e-9) * 100) / 100.0
   suggested_shares = max(1, int((account_size * 0.005) / risk_per_share))
   position_value = suggested_shares * entry_ref
   target_gain_pct = ((target_price - entry_ref) / entry_ref) * 100.0
@@ -709,6 +715,7 @@ def analyze_six_playbooks(df, account_size=100000, spy_ret_63d=0.0, df_1h=None):
     "TCT_Action": act, "TCT_Badge": badge, "TCT_Dot": dot, "TCT_Short_Sig": short_s, "TCT_Sig_Color": sig_clr,
     "TCT_Explain": expl, "TCT_Priority": prio, "BOS_Entry": entry_ref, "BOS_Level": bos_level,
     "Target_Price": target_price, "Stop_Price": effective_stop, "R_Multiple": r_multiple,
+    "Potential_RR": potential_rr, "Pot_Reward": pot_reward, "Pot_Risk": pot_risk,
     "Target_Pct": target_gain_pct, "Stop_Pct": stop_loss_pct, "Shares_05Pct": suggested_shares,
     "Pos_Value": position_value, "Dollar_Vol_M": dollar_vol_20 / 1e6, "RS_Diff": rs_diff,
     "RS_Leader": rs_leader, "RSI2": rsi2, "Paced_RVOL": paced_rvol, "Is_Oversold_Swing": is_rsi2_snapback,
@@ -1816,6 +1823,7 @@ if st.session_state.inspect_symbol is not None:
       st.markdown(f"**Profit Target:** `${d['Target_Price']:,.2f}` (+{d['Target_Pct']:.1f}%)")
       st.markdown(f"**Stop-Loss:** `${d['Stop_Price']:,.2f}` ({d['Stop_Pct']:.1f}%)")
       st.markdown(f"**Reward/Risk:** `{d['R_Multiple']:.2f}R` ({'Pass ≥2R' if d['TCT_2R_Pass'] else 'Below 2R'})")
+      st.markdown(f"**Potential Upside:** `{d.get('Potential_RR', d['R_Multiple']):.2f}R` (`+${d.get('Pot_Reward', 0.0):,.2f}` / `-${d.get('Pot_Risk', 0.0):,.2f}`)")
       st.markdown(f"**Suggested Shares:** `{d['Shares_05Pct']} shares` (${d['Pos_Value']:,.0f})")
       st.markdown(f"**{ma150_type}:** `${ma150_val:,.2f}`")
       st.markdown(f"**RSI(14) / RSI(2):** `{d['RSI']:.1f}` / `{d['RSI2']:.0f}`")
@@ -1855,9 +1863,12 @@ if st.session_state.inspect_symbol is not None:
       box_start_dt = last_dt + pd.Timedelta(days=step_days * 2)
       box_end_dt = last_dt + pd.Timedelta(days=box_span_days)
       box_mid_dt = box_start_dt + (box_end_dt - box_start_dt) / 2
-      entry_px = float(d["BOS_Entry"])
+      entry_px = float(d["BOS_Level"])
       tgt_px = float(d["Target_Price"])
       stp_px = float(d["Stop_Price"])
+      pot_rr_val = float(d.get("Potential_RR", d["R_Multiple"]))
+      pot_tgt_pct = ((tgt_px - entry_px) / entry_px * 100.0) if entry_px > 0 else d["Target_Pct"]
+      pot_stp_pct = ((stp_px - entry_px) / entry_px * 100.0) if entry_px > 0 else d["Stop_Pct"]
 
       if show_rr_box:
         # Green Profit Target Zone (Entry -> Target)
@@ -1888,10 +1899,10 @@ if st.session_state.inspect_symbol is not None:
           line=dict(color="#334155", width=1.8, dash="dot"),
           row=1, col=1
         )
-        # Price & R-Multiple Labels on the TradingView Box
+        # Price & Potential R/R Labels on the TradingView Box
         fig.add_annotation(
           x=box_mid_dt, y=tgt_px,
-          text=f"<b>TARGET: ${tgt_px:,.2f} (+{d['Target_Pct']:.1f}%)</b>",
+          text=f"<b>TARGET: ${tgt_px:,.2f} (+{pot_tgt_pct:.1f}%)</b>",
           showarrow=False, yshift=11,
           font=dict(size=11, color="#ffffff"),
           bgcolor="#0d9488", bordercolor="#0d9488", borderwidth=1, borderpad=3,
@@ -1899,7 +1910,7 @@ if st.session_state.inspect_symbol is not None:
         )
         fig.add_annotation(
           x=box_mid_dt, y=entry_px,
-          text=f"<b>ENTRY: ${entry_px:,.2f}  ·  {d['R_Multiple']:.2f}R R/R</b>",
+          text=f"<b>ENTRY: ${entry_px:,.2f}  ·  POTENTIAL R/R: {pot_rr_val:.2f}R</b>",
           showarrow=False,
           font=dict(size=10.5, color="#ffffff"),
           bgcolor="#334155", bordercolor="#334155", borderwidth=1, borderpad=3,
@@ -1907,7 +1918,7 @@ if st.session_state.inspect_symbol is not None:
         )
         fig.add_annotation(
           x=box_mid_dt, y=stp_px,
-          text=f"<b>STOP: ${stp_px:,.2f} ({d['Stop_Pct']:.1f}%)</b>",
+          text=f"<b>STOP: ${stp_px:,.2f} ({pot_stp_pct:.1f}%)</b>",
           showarrow=False, yshift=-11,
           font=dict(size=11, color="#ffffff"),
           bgcolor="#dc2626", bordercolor="#dc2626", borderwidth=1, borderpad=3,
@@ -2069,15 +2080,13 @@ TODAY'S STANDOUT SETUP · {best_pick['TCT_Action']} · {best_pick['TCT_Model']}
     st.markdown("""<style>.block-container { padding-top: 2.8rem !important; padding-bottom: 1rem !important; padding-left: 1.2rem !important; padding-right: 1.2rem !important; }</style>""", unsafe_allow_html=True)
     folder_names = list(watchlists.keys())
     folder_options = folder_names + ["All Watchlists Combined"]
-    ctrl1, ctrl2, ctrl3, ctrl4, ctrl5, ctrl6, ctrl7 = st.columns([1.8, 1.9, 1.9, 1.3, 1.3, 0.8, 1.1])
+    ctrl1, ctrl3, ctrl4, ctrl5, ctrl6, ctrl7 = st.columns([2.2, 2.2, 1.4, 1.6, 0.9, 1.1])
     with ctrl1:
       default_live_idx = folder_options.index(st.session_state.get("live_folder_sel")) if st.session_state.get("live_folder_sel") in folder_options else 0
       selected_live_folder = st.selectbox("Watchlist", folder_options, index=default_live_idx, label_visibility="collapsed")
       if selected_live_folder != st.session_state.get("live_folder_sel"):
         st.session_state.live_folder_sel = selected_live_folder
         persist_ui_state()
-    with ctrl2:
-      live_board_mode = st.selectbox("Board Mode", ["Custom Signal Board (Large Font)", "TradingView Streaming (Tick-by-Tick)"], index=0, label_visibility="collapsed")
     with ctrl3:
       live_sort = st.selectbox(
         "Rank / Sort",
@@ -2207,7 +2216,7 @@ TODAY'S STANDOUT SETUP · {best_pick['TCT_Action']} · {best_pick['TCT_Model']}
           )
         else:
           st.info("No active positions tracked. Manage your positions in the Watchlist tab.")
-      elif live_board_mode.startswith("Custom Signal Board"):
+      else:
         def build_half_table_html(sym_slice):
           rows_html = ""
           for sym in sym_slice:
@@ -2238,62 +2247,6 @@ TODAY'S STANDOUT SETUP · {best_pick['TCT_Action']} · {best_pick['TCT_Model']}
           st.caption(f"🔥 Momentum · 📈 Stage 2 HL · 🟢 Buy Now · 🎯 Swing Buy · 🔔 150MA Radar · 🪃 Oversold · 📐 TCT Box · 🔵 Uptrend  |  **Tap Symbol** for Full Dossier · **Tap Price** for Bottom Live Chart  |  *{timer_status} · Last updated: {datetime.now().strftime('%H:%M:%S')}*")
         else:
           st.info("No symbols found in this watchlist.")
-      else:
-        tv_all_syms = ordered_syms + missing_syms
-        if tv_all_syms:
-          tape_symbols = [
-            {"proName": "FOREXCOM:SPXUSD", "title": "S&P 500"},
-            {"proName": "FOREXCOM:NSXUSD", "title": "Nasdaq 100"},
-            {"proName": "BITSTAMP:BTCUSD", "title": "Bitcoin"}
-          ] + [{"proName": s, "title": s} for s in tv_all_syms[:25]]
-          components.html(f"""
-<div class="tradingview-widget-container">
-<div class="tradingview-widget-container__widget"></div>
-<script type="text/javascript" src="https://s3.tradingview.com/external-embedding/embed-widget-ticker-tape.js" async>
-{{
-"symbols": {json.dumps(tape_symbols)},
-"showSymbolLogo": true,
-"isTransparent": false,
-"displayMode": "regular",
-"colorTheme": "light",
-"locale": "en"
-}}
-</script>
-</div>
-""", height=120)
-          st.markdown("<div style='margin-top:24px;'></div>", unsafe_allow_html=True)
-          mid = (len(tv_all_syms) + 1) // 2
-          l_tv = [{"name": s, "displayName": f"{live_records[s]['TCT_Dot']} {s}" if s in live_records else s} for s in tv_all_syms[:mid]]
-          r_tv = [{"name": s, "displayName": f"{live_records[s]['TCT_Dot']} {s}" if s in live_records else s} for s in tv_all_syms[mid:]]
-          wh = max(460, min(820, mid * 38 + 100))
-          tc1, tc2 = st.columns(2)
-          g1_json = json.dumps([{"name": f"{selected_live_folder} (Col 1)", "symbols": l_tv}])
-          g2_json = json.dumps([{"name": f"{selected_live_folder} (Col 2)", "symbols": r_tv}])
-          with tc1:
-            components.html(
-              f'<div class="tradingview-widget-container">'
-              f'<div class="tradingview-widget-container__widget"></div>'
-              f'<script type="text/javascript" '
-              f'src="https://s3.tradingview.com/external-embedding/embed-widget-market-quotes.js" async>'
-              f'{{"width": "100%", "height": {wh}, "symbolsGroups": {g1_json}, '
-              f'"showSymbolLogo": true, "colorTheme": "light", "locale": "en"}}'
-              f'</script></div>',
-              height=wh + 16
-            )
-          with tc2:
-            if r_tv:
-              components.html(
-                f'<div class="tradingview-widget-container">'
-                f'<div class="tradingview-widget-container__widget"></div>'
-                f'<script type="text/javascript" '
-                f'src="https://s3.tradingview.com/external-embedding/embed-widget-market-quotes.js" async>'
-                f'{{"width": "100%", "height": {wh}, "symbolsGroups": {g2_json}, '
-                f'"showSymbolLogo": true, "colorTheme": "light", "locale": "en"}}'
-                f'</script></div>',
-                height=wh + 16
-              )
-          pills_b = "".join([f'<a href="?rt_chart={s}" target="_self" class="pill" title="Open Bottom Live Chart">{live_records[s]["TCT_Dot"] if s in live_records else "📈"} {s}</a>' for s in tv_all_syms])
-          st.markdown(f"<div style='margin-top:4px;'><b>Tap any symbol to open Bottom Live Chart:</b><br>{pills_b}</div>", unsafe_allow_html=True)
     if run_every_sec and hasattr(st, "fragment"):
       @st.fragment(run_every=run_every_sec)
       def _auto_refresh_fragment():
