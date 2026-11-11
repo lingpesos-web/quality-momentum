@@ -2623,7 +2623,10 @@ TODAY'S STANDOUT SETUP · {best_pick['TCT_Action']} · {best_pick['TCT_Model']}
             if added_any:
               sync_file_to_github(watchlists, DATA_FILE)
               st.toast(f"Added {raw_v} to {selected_live_folder}")
-            st.session_state[lv_add_key] = ""
+            try:
+              st.session_state[lv_add_key] = ""
+            except Exception:
+              pass
         st.text_input(
           "Quick Add Ticker",
           placeholder=f"+ Add to {selected_live_folder}",
@@ -2962,7 +2965,10 @@ ${m['Price']:,.2f} · <span style="color:{'#15803d' if m['Change']>=0 else '#b91
             if added_any:
               sync_file_to_github(watchlists, DATA_FILE)
               st.toast(f"Added {raw_s} to {folder}")
-            st.session_state[wl_in_key] = ""
+            try:
+              st.session_state[wl_in_key] = ""
+            except Exception:
+              pass
         c_in.text_input(
           "Add symbol to folder",
           placeholder=f"Add to {folder} (e.g. AVGO)",
@@ -2970,9 +2976,12 @@ ${m['Price']:,.2f} · <span style="color:{'#15803d' if m['Change']>=0 else '#b91
           key=wl_in_key,
           on_change=_commit_wl_add
         )
-        if c_btn.button("+ Add", use_container_width=True):
-          _commit_wl_add()
-          st.rerun()
+        c_btn.button(
+          "+ Add",
+          use_container_width=True,
+          key=f"wl_add_btn_{folder}",
+          on_click=_commit_wl_add
+        )
       with col_sort:
         sort_by = st.selectbox(
           "Sort By",
