@@ -108,7 +108,9 @@ for k, v in [
   ("wl_preset_filter", saved_ui.get("wl_preset_filter", "ALL")),
   ("last_good_data", {}),
   ("chat_messages", []),
-  ("sds_videos", [])
+  ("sds_videos", []),
+  ("strategist_report", ""),
+  ("strategist_report_title", "")
 ]:
   if k not in st.session_state:
     st.session_state[k] = v
@@ -1628,10 +1630,70 @@ def send_strategist_email_report(subject_str, markdown_body):
   except Exception as e:
     return False, f"SMTP error: {str(e)[:80]}"
 
+@st.cache_data(ttl=600, show_spinner=False)
+def fetch_global_cross_sector_news(max_items=24, max_age_hours=72):
+  queries = [
+    ("oil prices inflation currency depreciation Asia Europe emerging markets economy when:3d", "GLOBAL MACRO"),
+    ("Federal Reserve Treasury yields sovereign debt geopolitics war supply chain when:3d", "GEOPOLITICS/RATES"),
+    ("defense energy industrials financials healthcare biotech stocks earnings catalyst when:3d", "CROSS-SECTOR"),
+    ("ARK Invest Cathie Wood Stocktwits market rotation institutional flows when:3d", "FLOWS/SENTIMENT")
+  ]
+  pool, seen_links, seen_titles = [], set(), set()
+  results = _safe_parallel_map(lambda qt: _fetch_rss_raw(qt[0], 10, qt[1], max_age_hours), queries, max_workers=2)
+  for batch in results:
+    for item in batch:
+      norm_t = item["title"][:45].lower()
+      if item["link"] not in seen_links and norm_t not in seen_titles:
+        seen_links.add(item["link"]); seen_titles.add(norm_t); pool.append(item)
+  return sorted(pool, key=lambda x: x["timestamp"], reverse=True)[:max_items]
+
+SCHEDULE_PROMPT_0615 = (
+  "Every day (Monday to Sunday) at 06:15 AM HKT, generate my Daily Chief Strategist Report in English using "
+  "Independent Second-Order Anticipation and Chart Confirmation. Do not merely repeat headlines—anticipate lagged "
+  "chain reactions before they are priced in. Treat any external commentary (including @sds.getrich) as just one "
+  "optional perspective to critically evaluate or challenge, never as gospel. Structure the report into 4 sections:\n"
+  "1. LAGGED MACRO, GEOPOLITICAL & CURRENCY CHAIN REACTIONS (GLOBAL SCOPE): Analyze the second- and third-order impact "
+  "of current geopolitical conflicts, energy/oil price trajectories, sticky inflation, sovereign debt strain, and "
+  "currency depreciation across Asia, Europe, the Middle East, and the US. Identify which global/regional ETFs "
+  "(e.g., Europe, Japan, South Korea, China, Emerging Markets, Bonds, Currency/Commodity ETFs) face hidden medium-term "
+  "downside or short setups, and which hard assets or macro hedges benefit.\n"
+  "2. CROSS-SECTOR ANTICIPATION (ALL 11 SECTORS, BEYOND JUST TECH/AI): Trace where capital, pricing power, and orders "
+  "are rotating across Energy, Defense, Industrials, Utilities/Power, Financials, Healthcare/Biotech, Materials/Metals, "
+  "Consumer, and Tech/AI. When a dominant company or sector faces a bottleneck, regulation, or valuation compression, "
+  "identify the second-order beneficiaries and hidden casualties.\n"
+  "3. STRICT CHART & TECHNICAL CONFIRMATION (SEPARATING ANTICIPATION FROM VALUE TRAPS): Cross-check every macro and "
+  "fundamental thesis against actual daily candlestick structure (Price vs. 20-EMA, 50-EMA, 150-SMA, RSI, and Volume). "
+  "Explicitly warn against catching falling knives in Stage 4 downtrends below the 150-MA, and highlight setups backed "
+  "by institutional accumulation (Stage 2 Higher Low, TCT Bottom Box, 150-MA Reversal Radar, or 20-EMA Pullback).\n"
+  "4. ACTIONABLE PORTFOLIO & WATCHLIST GAME PLAN: Provide exact Buy Trigger, Stop-Loss, Profit Target, and Potential R/R "
+  "for the highest-conviction setups."
+)
+
+SCHEDULE_PROMPT_0915 = (
+  "Every day (Monday to Sunday) at 09:15 AM HKT, search my Gmail inbox for the latest emails from "
+  "newsletter@thedailyrip.stocktwits.com (including weekend editions) and tradingdesk@arkfunds.com, and generate my "
+  "Morning Newsletter & Institutional Flows Audit in English:\n"
+  "1. STOCKTWITS 'THE DAILY RIP' CRITIQUE & SECOND-ORDER ANTICIPATION: Extract the most important market stories, "
+  "after-hours earnings, and retail sentiment themes. Do not repeat the surface narrative—identify where retail "
+  "sentiment is overreacting to noise versus where a multi-week structural rotation across sectors is starting.\n"
+  "2. ARK TRADING DESK AUDIT VS. CHART STRUCTURE: List Cathie Wood / ARK's latest buys and sells from the email and "
+  "critically audit each ticker against its daily candlestick trend (Price vs. 20-EMA, 50-EMA, 150-SMA, RVOL, and "
+  "valuation). Flag which ARK buys have genuine Stage 2 technical confirmation and which ones are premature "
+  "bottom-fishing in broken Stage 4 charts.\n"
+  "3. TOP 3 HIGH-CONVICTION ACTION ITEMS: Give the 3 best actionable trades or risk-management adjustments for the "
+  "session with exact Buy Trigger, Stop-Loss, Profit Target, and Potential R/R."
+)
+
 def build_second_order_strategist_prompt(report_mode="0615_MAIN", custom_newsletters_text=""):
   all_tks = get_all_monitored_tickers()
-  extra_comp_etfs = ["NVDA", "AMD", "MU", "INTC", "EWJ", "EWY", "VRT", "COHR", "LITE", "PLTR", "CRDO", "AVGO", "TSM"]
-  combined_tks = list(dict.fromkeys(all_tks + extra_comp_etfs))[:42]
+  global_cross_sector_bench = [
+    # Global Macro, Regional & Currency/Bond/Commodity Benchmarks
+    "EWJ", "EWY", "FXI", "VGK", "EEM", "USO", "GLD", "SLV", "TLT", "UUP",
+    # Cross-Sector ETFs & Institutional Leaders across All 11 Sectors
+    "XLE", "XLI", "ITA", "XLF", "XLV", "XLU", "URA", "CCJ", "GE", "RTX",
+    "LLY", "JPM", "COST", "NVDA", "AMD", "MU", "INTC", "AVGO", "TSM", "VRT", "COHR", "LITE", "PLTR"
+  ]
+  combined_tks = list(dict.fromkeys(all_tks + global_cross_sector_bench))[:50]
   snap = fetch_batch_market_data(combined_tks, account_size=settings["account_size"])
   t_lines = []
   for sym_k in combined_tks:
@@ -1645,44 +1707,60 @@ def build_second_order_strategist_prompt(report_mode="0615_MAIN", custom_newslet
       f"EMA20=${r['EMA20_Val']:.2f}, EMA50=${r['EMA50_Val']:.2f}, SMA150=${r['SMA150_Val']:.2f}, "
       f"RSI14={r['RSI']:.1f}, Paced_RVOL={r['Paced_RVOL']:.2f}x, RS_vs_SPY={r['RS_Diff']:+.1f}%"
     )
+  pos_lines = []
+  for p in positions:
+    pos_lines.append(
+      f"{p['Ticker']}: {p['Shares']} shs @ Buy ${p['BuyPrice']:.2f}, Current Stop ${p['StopLoss']:.2f}, "
+      f"+15% Target ${p['Target15']:.2f}, Thesis: {p.get('Remarks', '')}"
+    )
   vids = fetch_sds_latest_videos()
   vid_lines = [f"- [{v['date']}] {v['title']} ({v['link']})" for v in vids[:5]]
-  wl_news = fetch_watchlist_news_pool(all_tks[:18], max_items=18, max_age_hours=48)
-  mkt_news = fetch_google_news_rss("US stock market AI semiconductors Federal Reserve", max_items=12, max_age_hours=48)
-  mcf_news = fetch_metals_crypto_fx_news(max_items=10, max_age_hours=48)
-  news_lines = [f"- [{a.get('ticker', 'MKT')} | {a['age']}] {a['title']} ({a['publisher']})" for a in (wl_news[:12] + mkt_news[:8] + mcf_news[:6])]
+  wl_news = fetch_watchlist_news_pool(all_tks[:18], max_items=16, max_age_hours=72)
+  macro_sec_news = fetch_global_cross_sector_news(max_items=18, max_age_hours=72)
+  mcf_news = fetch_metals_crypto_fx_news(max_items=10, max_age_hours=72)
+  news_lines = [
+    f"- [{a.get('ticker', 'MACRO')} | {a['age']}] {a['title']} ({a['publisher']})"
+    for a in (macro_sec_news[:14] + wl_news[:12] + mcf_news[:8])
+  ]
 
   imap_text, imap_status = fetch_gmail_newsletters_imap()
-  nl_block = custom_newsletters_text.strip() or imap_text or "No direct IMAP newsletter body loaded; use the latest market/ARK/Stocktwits catalysts from headlines."
+  nl_block = custom_newsletters_text.strip() or imap_text or "No direct IMAP newsletter body loaded; synthesize from the latest market, sector, and institutional flow headlines."
 
   if report_mode == "0915_SUPPLEMENT":
     task_instructions = (
-      "請用繁體中文（廣東話財經分析風格）撰寫【09:15 AM HKT 晨間電郵補充包：Stocktwits 深度內幕 ＋ ARK 持倉變動交叉驗證】。\n"
-      "結構要求：\n"
-      "1. **Stocktwits《The Daily Rip》核心內幕與二階思維推演**：提取最關鍵嘅突發新聞、盤後業績（例如 AI 算力、晶片調查、大型 IPO 或宏觀利率轉向），唔好只講表面升跌，推演邊隻競爭對手或上下游股票會受惠或受害。\n"
-      "2. **ARK Trading Desk 買賣清單交叉對比**：分析 Cathie Wood 最新買入同沽出嘅股票，對比我哋 Dashboard 嘅真實陰陽燭圖表（20-EMA、150-MA、RVOL、Playbook 訊號），判斷邊隻跟得過、邊隻圖表仲係弱勢唔好接飛刀。\n"
-      "3. **今日美股開市前 Top 3 實戰行動清單**：給出明確嘅 Buy Trigger、Stop-Loss、Target 同埋潛在 R/R。"
+      "Write the 【09:15 AM HKT Morning Newsletter & Institutional Flows Audit (Stocktwits + ARK Cross-Check)】 in clear, authoritative English.\n"
+      " Core Philosophy: Stock picking is about ANTICIPATION, not repeating news. Critically challenge consensus narratives.\n"
+      "Required Structure:\n"
+      "1. **Stocktwits 'The Daily Rip' Critique & Second-Order Anticipation**: Extract the most important breaking stories, after-hours earnings, and macro shifts (including weekend editions). Identify where retail sentiment is chasing noise versus where a real multi-week cross-sector rotation is beginning.\n"
+      "2. **ARK Trading Desk Audit vs. Candlestick Structure**: Evaluate Cathie Wood's latest buys and sells against our live daily candlestick data (Price vs. 20-EMA, 50-EMA, 150-SMA, RVOL, and Playbook signals). Explicitly call out which ARK buys are backed by Stage 2 institutional accumulation and which ones are dangerous bottom-fishing in broken Stage 4 charts.\n"
+      "3. **Top 3 High-Conviction Action Items**: Output the 3 best actionable setups (Buy, Avoid/Short, or Stop Adjustment) with exact Buy Trigger, Stop-Loss, Profit Target, and Potential R/R."
     )
   else:
     task_instructions = (
-      "請用繁體中文（廣東話專業投資策略師風格）撰寫【06:15 AM HKT 收市後首席策略師深度日報（二階思維 ＋ 圖表驗證）】。\n"
-      "你必須展現獨立判斷能力與二階思維（Second-Order Thinking），嚴格按照以下四個部分輸出：\n"
-      "1. **宏觀大局與亞洲/歐美資金流推演（結合掃地僧最新觀點 ＋ ETF 策略）**：\n"
-      "   - 結合掃地僧最新宏觀邏輯與當日美股收市表現，檢視亞洲 ETF（`EWJ` 日本 vs `EWY` 南韓）及美元/金銀/Crypto 走勢，給出具體造淡或對沖嘅圖表阻力位、止蝕位與目標價。\n"
-      "2. **焦點新聞二階推演：龍頭震盪 vs. 競爭對手邊隻真受惠？（例如 NVDA vs AMD / MU / INTC）**：\n"
-      "   - 針對當日最爆嘅科技或半導體新聞，分析資金係咪出現輪動？逐一核對競爭對手（如 `AMD`、`MU`、`INTC`、`AVGO`）嘅真實陰陽燭數據（收市價、20-EMA、150-MA、成交量 RVOL），分清邊隻係「真金白銀流入嘅真受惠股（附買入價/止蝕/目標 R/R）」，邊隻係「基本面與圖表雙輸嘅價值陷阱」。\n"
-      "3. **政策／基建／AI 二階推演（例如數據中心電網審批、AI 債務週期對 `VRT` / `COHR` / `LITE` / `PLTR` 嘅影響）**：\n"
-      "   - 推演政策或行業瓶頸下嘅逆向贏家，並用 Dashboard 技術指標驗證。\n"
-      "4. **Watchlist 與持倉精選 Action Plan**：\n"
-      "   - 挑選出今日圖表結構最靚（例如 Stage 2 Higher Low、TCT Bottom Box 或 20-EMA Pullback）嘅 Top 3 股票，列出準確 Buy Trigger、Stop-Loss、Take Profit 同 Potential R/R。"
+      "Write the 【06:15 AM HKT Chief Strategist Global Anticipation & Cross-Sector Report】 in clear, authoritative English.\n"
+      "Core Philosophy: Stock picking is NOT about 'now' or repeating headlines—it is about ANTICIPATING second- and third-order consequences before they show up in consensus numbers. "
+      "Note on External Views: @sds.getrich (Sweeping Monk) is just one macro perspective among many; critically evaluate, supplement, or disagree with his views whenever global macro data or chart structures point elsewhere.\n"
+      "Output strictly in 4 well-structured sections:\n"
+      "1. **Lagged Macro, Geopolitical & Currency Chain Reactions (Global Scope — US, Europe, Asia, Middle East)**:\n"
+      "   - Look beyond immediate price moves to anticipate delayed structural damage (for example: even if oil prices pull back from war highs, analyze the long-tail damage of sticky inflation, currency depreciation, and energy-import stress on vulnerable economies in Asia and Europe).\n"
+      "   - Compare regional and macro ETFs (`VGK` Europe, `EWJ` Japan, `EWY` South Korea, `FXI` China, `EEM` Emerging Markets, `USO` Oil, `GLD`/`SLV` Metals, `TLT` Bonds, `UUP` USD) using their exact chart levels to identify what to buy, what to avoid, and where to hedge/short.\n"
+      "2. **Cross-Sector Second-Order Winners & Losers (All 11 Sectors — Not Just Tech/AI)**:\n"
+      "   - Analyze the most important policy, geopolitical, regulatory, supply-chain, or earnings shifts across Energy (`XLE`), Defense (`ITA`/`RTX`), Industrials (`XLI`/`GE`), Utilities & Nuclear (`XLU`/`URA`/`CEG`), Financials (`XLF`/`JPM`), Healthcare/Biotech (`XLV`/`LLY`/`ADPT`), Consumer (`COST`/`WMT`), and Tech/Semis (`NVDA`/`AMD`/`MU`/`AVGO`/`VRT`/`COHR`/`LITE`/`PLTR`).\n"
+      "   - Trace second-order capital rotation: when one industry or leader faces a bottleneck or headwind, which adjacent sector or competitor captures the windfall?\n"
+      "3. **Strict Chart & Technical Confirmation (Separating Anticipation from Value Traps)**:\n"
+      "   - Cross-check every fundamental anticipation against our live daily candlestick metrics (Close, 20-EMA, 50-EMA, 150-SMA, RSI14, and Paced RVOL).\n"
+      "   - Warn against catching falling knives in stocks trading below a declining 150-MA, and spotlight stocks where forward-looking anticipation is confirmed by `Stage 2 Higher Low`, `TCT Bottom Box`, `150-MA Reversal Radar`, or `20-EMA Pullback` setups.\n"
+      "4. **Actionable Portfolio & Watchlist Game Plan (Top 5 High-Conviction Setups)**:\n"
+      "   - Audit the user's open positions and select the strongest actionable setups across the watchlist and global benchmarks, specifying exact **Buy Trigger (BOS)**, **Stop-Loss**, **Take-Profit Target**, **Suggested Share Size**, and **Potential R/R**."
     )
 
   full_prompt = (
     f"{task_instructions}\n\n"
-    f"=== 掃地僧 (@sds.getrich) 最新宏觀影片主題 ===\n" + "\n".join(vid_lines) + "\n\n"
-    f"=== 最新 48 小時 Watchlist、大市、金屬及 Crypto 新聞 ===\n" + "\n".join(news_lines) + "\n\n"
-    f"=== Stocktwits & ARK 電郵 / 通訊內容 ({imap_status}) ===\n{nl_block}\n\n"
-    f"=== 實時陰陽燭圖表與 8 大 Playbook 數據 ===\n" + "\n".join(t_lines)
+    f"=== USER'S OPEN POSITIONS ===\n" + ("\n".join(pos_lines) if pos_lines else "None currently open.") + "\n\n"
+    f"=== GLOBAL MACRO, CROSS-SECTOR & WATCHLIST Headlines (Last 72H) ===\n" + "\n".join(news_lines) + "\n\n"
+    f"=== @sds.getrich Recent Video Topics (One Perspective to Evaluate Critically) ===\n" + "\n".join(vid_lines) + "\n\n"
+    f"=== Stocktwits & ARK Email/Newsletter Content ({imap_status}) ===\n{nl_block}\n\n"
+    f"=== LIVE CANDLESTICK & 8-PLAYBOOK TECHNICAL DATA (GLOBAL ETFs + SECTORS + WATCHLIST) ===\n" + "\n".join(t_lines)
   )
   return full_prompt
 
@@ -1691,14 +1769,10 @@ def query_gemini_copilot(user_prompt, chat_history, portfolio_context, model_pre
   if not api_key:
     return "Please enter your **Gemini API Key** in the box above (or add `GEMINI_API_KEY` to your Streamlit Secrets) to activate live AI chat."
   sys_text = (
-    "You are an institutional-grade AI Macro & Quantitative Trading Co-Pilot embedded inside the user's Quality Momentum & Stage 2 Cockpit. "
-    "Provide deep, rigorous, structured analysis with exact price levels, stop-loss math, R-multiples, and macro regime reasoning. "
-    "You have full knowledge of their live portfolio, watchlist technical signals across all 8 Playbooks, "
-    "the 6-Phase Fed Interest Rate Cycle (Bull 1 Stop Cutting -> Bull 2 First Hike -> Bull 3 Hike Pause/Expansion -> Bear 1 First Cut), "
-    "and the 3-month macro synthesis from @sds.getrich (1. AI capex & private-credit debt bubble in CoreWeave/Oracle; "
-    "2. Eurozone Crisis 2.0 driving capital flight into USD assets; 3. Dec 2026 23-hour US trading & USDT/USDC stablecoins "
-    "draining Asian liquidity into US stocks and T-bills; 4. Hit-and-run profit management: buying Stage 2 Higher Lows, "
-    "selling 50% at +15%, and trailing stops above the 20-EMA).\n\n"
+    "You are an independent, institutional-grade Chief Investment Strategist & Quantitative Trading Co-Pilot embedded inside the user's Quality Momentum & Stage 2 Cockpit. "
+    "Your core edge is ANTICIPATION and SECOND-ORDER THINKING across global macro (US, Europe, Asia, Middle East, currencies, commodities, rates) and all 11 equity sectors—not repeating surface news. "
+    "Treat external commentators (such as @sds.getrich, ARK Invest, or media headlines) as single viewpoints to critically test against macro logic and daily candlestick structure (20-EMA, 50-EMA, 150-SMA, RVOL, and the 8 Playbooks). "
+    "Always provide exact price levels, stop-loss math, targets, and Potential R/R ratios.\n\n"
     f"LIVE DASHBOARD & TECHNICAL CONTEXT:\n{portfolio_context}"
   )
   contents = []
@@ -1740,11 +1814,11 @@ def query_gemini_copilot(user_prompt, chat_history, portfolio_context, model_pre
 
   pro_sorted = sorted(discovered, key=_score_model_pro_first) if discovered else []
   default_fallbacks = [
+    "gemini-3.1-pro-preview",
     "gemini-2.5-pro",
     "gemini-2.5-flash",
     "gemini-2.0-flash",
-    "gemini-1.5-pro",
-    "gemini-1.5-flash"
+    "gemini-1.5-pro"
   ]
   if model_pref and model_pref != "auto":
     candidate_models = list(dict.fromkeys([model_pref] + pro_sorted + default_fallbacks))
@@ -1788,7 +1862,7 @@ def query_gemini_copilot(user_prompt, chat_history, portfolio_context, model_pre
           headers={"Content-Type": "application/json"},
           method="POST"
         )
-        with urllib.request.urlopen(req, timeout=45) as resp:
+        with urllib.request.urlopen(req, timeout=55) as resp:
           res_json = json.loads(resp.read().decode("utf-8"))
           parts = res_json["candidates"][0]["content"]["parts"]
           ans_chunks = [p.get("text", "") for p in parts if not p.get("thought", False) and p.get("text")]
@@ -1800,27 +1874,178 @@ def query_gemini_copilot(user_prompt, chat_history, portfolio_context, model_pre
         continue
   return f"Gemini API Error: {last_err[:200]}"
 
+REPORT_CACHE_FILE = f"strategist_report{USER_SUFFIX}.json"
+
 def render_ai_copilot_tab():
-  st.markdown("<h1>AI Macro & Trade Co-Pilot</h1>", unsafe_allow_html=True)
+  st.markdown("<h1>AI Macro & Chief Strategist Cockpit</h1>", unsafe_allow_html=True)
   st.markdown(
     '<div style="background:#0f291e;color:#f4efe6;padding:12px 16px;border-radius:10px;margin-bottom:14px;">'
     '<div style="font-size:0.75rem;color:#c5a059;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;">'
-    'INTEREST RATE CYCLE POSITION (BULL 1-2-3 / BEAR 1-2-3 FRAMEWORK)</div>'
+    'GLOBAL MACRO & CROSS-SECTOR ANTICIPATION ENGINE · 6-PHASE RATE CYCLE</div>'
     '<div style="font-size:0.95rem;font-weight:700;margin-top:4px;">'
-    'Bull 1 (Stop Cutting: ON) Bull 2 (First HikeShakeout: OFF) '
+    'Bull 1 (Stop Cutting: ON) · Bull 2 (First Hike Shakeout: OFF) · '
     '<span style="background:#15803d;color:#fff;padding:2px 8px;border-radius:4px;">'
-    'CURRENT: Late Bull 2 / Early Bull 3 (Hike Pause · Expansion Wave ON)</span> '
+    'CURRENT: Late Bull 2 / Early Bull 3 (Hike Pause · Cross-Sector Rotation ON)</span> · '
     'Bear 1 (First Rate Cut: OFF)</div>'
     '<div style="font-size:0.80rem;color:#cbd5e1;margin-top:6px;">'
-    '<b>Playbook Alignment:</b> Following the Sept 2026 hike and Oct 2026 Fed pause, the market is transitioning from Bull 2 digestion into the Bull 3 expansion wave. '
-    'Focus on <b>Stage 2 Higher Lows</b> in liquid US leaders & hard assets, scale out 50% on +15% surges, and trail stops above the 20-EMA.'
+    '<b>Strategist Mandate:</b> Anticipate lagged second- and third-order effects across global currencies, commodities, and all 11 equity sectors—and demand strict daily candlestick confirmation (<b>Stage 2 Higher Lows</b>, <b>TCT Bottoms</b>, <b>150-MA Reversals</b>) before committing capital.'
     '</div></div>',
     unsafe_allow_html=True
   )
-  col_macro, col_chat = st.columns([1.15, 1.35])
+
+  # Load cached full-width report if session state is empty
+  if not st.session_state.get("strategist_report"):
+    saved_rep = load_json(REPORT_CACHE_FILE, {})
+    if isinstance(saved_rep, dict) and saved_rep.get("body"):
+      st.session_state["strategist_report"] = saved_rep.get("body", "")
+      st.session_state["strategist_report_title"] = saved_rep.get("title", "Daily Chief Strategist Report")
+
+  # --- TOP CONTROL BAR: MODEL SELECTOR, REPORT GENERATORS & GMAIL AUTO-DELIVERY ---
+  st.markdown("### 1. Full-Width Daily Chief Strategist Report (English · Global Anticipation & Chart Audit)")
+  ctl1, ctl2, ctl3, ctl4 = st.columns([1.5, 1.0, 1.35, 1.35])
+  model_choice = ctl1.selectbox(
+    "AI Model Engine",
+    [
+      "auto",
+      "gemini-3.1-pro-preview",
+      "gemini-2.5-pro",
+      "gemini-2.5-flash"
+    ],
+    index=0,
+    format_func=lambda x: {
+      "auto": "Auto (Best Pro / High-Thinking Available)",
+      "gemini-3.1-pro-preview": "Gemini 3.1 Pro Preview (Max Intelligence)",
+      "gemini-2.5-pro": "Gemini 2.5 Pro (Deep Reasoning · High Thinking)",
+      "gemini-2.5-flash": "Gemini 2.5 Flash (Fast + Thinking)"
+    }[x]
+  )
+  thinking_choice = ctl2.selectbox(
+    "Thinking Depth",
+    ["HIGH", "MEDIUM", "LOW"],
+    index=0,
+    format_func=lambda x: {
+      "HIGH": "High Thinking (Deep)",
+      "MEDIUM": "Medium Thinking",
+      "LOW": "Low Thinking (Fast)"
+    }[x]
+  )
+  run_main_btn = ctl3.button("Generate 06:15 AM Global Anticipation Report", type="primary", use_container_width=True)
+  run_supp_btn = ctl4.button("Generate 09:15 AM Stocktwits & ARK Audit", type="primary", use_container_width=True)
+
+  pos_summary = []
+  for p in positions:
+    pos_summary.append(f"{p['Ticker']}: {p['Shares']} shs @ ${p['BuyPrice']:.2f}, Stop ${p['StopLoss']:.2f}, +15% Target ${p['Target15']:.2f}, Remarks: {p.get('Remarks', '')}")
+  monitored_tks = get_all_monitored_tickers()[:35]
+  live_snap = fetch_batch_market_data(monitored_tks, account_size=settings["account_size"])
+  tech_lines = []
+  for sym_k, rec_v in list(live_snap.items())[:30]:
+    tech_lines.append(
+      f"{sym_k}: Price ${rec_v['Price']:.2f} ({rec_v['Change_Pct']:+.2f}%), "
+      f"Playbook={rec_v['TCT_Model']}, Action={rec_v['TCT_Action']}, "
+      f"Trigger=${rec_v['BOS_Level']:.2f}, Target=${rec_v['Target_Price']:.2f}, "
+      f"Stop=${rec_v['Stop_Price']:.2f}, Pot_RR={rec_v.get('Potential_RR', rec_v['R_Multiple']):.2f}R, "
+      f"SMA150=${rec_v['SMA150_Val']:.2f}, EMA20=${rec_v['EMA20_Val']:.2f}, RSI={rec_v['RSI']:.1f}, RS_vs_SPY={rec_v['RS_Diff']:+.1f}%"
+    )
+  port_ctx = (
+    "OPEN POSITIONS:\n" + ("\n".join(pos_summary) if pos_summary else "None open.") +
+    "\n\nWATCHLIST LIVE TECHNICALS:\n" + ("\n".join(tech_lines) if tech_lines else "No watchlist data loaded.")
+  )
+
+  if run_main_btn or run_supp_btn:
+    r_mode = "0615_MAIN" if run_main_btn else "0915_SUPPLEMENT"
+    r_title = (
+      f"06:15 AM Global Anticipation & Cross-Sector Report ({datetime.now().strftime('%Y-%m-%d %H:%M')})"
+      if run_main_btn else
+      f"09:15 AM Stocktwits & ARK Institutional Audit ({datetime.now().strftime('%Y-%m-%d %H:%M')})"
+    )
+    with st.spinner("Running High-Thinking Global Anticipation & Candlestick Cross-Verification..."):
+      full_p = build_second_order_strategist_prompt(report_mode=r_mode)
+      generated_rep = query_gemini_copilot(
+        full_p,
+        [],
+        port_ctx,
+        model_pref=model_choice,
+        thinking_level=thinking_choice
+      )
+      st.session_state["strategist_report"] = generated_rep
+      st.session_state["strategist_report_title"] = r_title
+      save_json(REPORT_CACHE_FILE, {"title": r_title, "body": generated_rep})
+      if settings.get("auto_email_report", False):
+        ok_auto, msg_auto = send_strategist_email_report(r_title, generated_rep)
+        if ok_auto:
+          st.toast(f"Auto-emailed report: {msg_auto}")
+      st.rerun()
+
+  # --- FULL-WIDTH EDITORIAL READER FOR THE CHIEF STRATEGIST REPORT ---
+  if st.session_state.get("strategist_report"):
+    rep_title = st.session_state.get("strategist_report_title", "Daily Chief Strategist Report")
+    rep_body = st.session_state["strategist_report"]
+    st.markdown(
+      f'<div style="background:#ffffff;border:2px solid #0f291e;border-radius:12px;padding:24px 30px;margin:14px 0 20px 0;box-shadow:0 4px 14px rgba(0,0,0,0.05);">'
+      f'<div style="display:flex;justify-content:space-between;align-items:center;border-bottom:2px solid #e7e2d9;padding-bottom:10px;margin-bottom:16px;">'
+      f'<span style="font-family:Newsreader,serif;font-size:1.45rem;font-weight:700;color:#0f291e;">{rep_title}</span>'
+      f'<span class="badge badge-tct-buy">FULL-WIDTH READER</span></div>',
+      unsafe_allow_html=True
+    )
+    st.markdown(rep_body)
+    st.markdown('</div>', unsafe_allow_html=True)
+
+    rb1, rb2, rb3, rb4 = st.columns(4)
+    if rb1.button("Email Report to Gmail", type="primary", use_container_width=True, key="fw_email_btn"):
+      ok_e, msg_e = send_strategist_email_report(rep_title, rep_body)
+      if ok_e:
+        st.success(msg_e)
+      else:
+        st.warning(msg_e)
+    if rb2.button("Push Report to ntfy / Telegram", use_container_width=True, key="fw_push_btn"):
+      ok_p, msg_p = send_ntfy_alert(rep_body[:3800], rep_title)
+      if ok_p:
+        st.success(f"Pushed: {msg_p}")
+      else:
+        st.error(msg_p)
+    rb3.download_button(
+      "Download Report (.md)",
+      data=f"# {rep_title}\n\n{rep_body}".encode("utf-8"),
+      file_name=f"chief_strategist_report_{datetime.now().strftime('%Y%m%d_%H%M')}.md",
+      mime="text/markdown",
+      use_container_width=True,
+      key="fw_dl_md"
+    )
+    if rb4.button("Close Full-Width Report", use_container_width=True, key="fw_close_btn"):
+      st.session_state["strategist_report"] = ""
+      save_json(REPORT_CACHE_FILE, {})
+      st.rerun()
+
+  with st.expander("Copy-Ready Gemini Scheduled Action Prompts (06:15 AM & 09:15 AM HKT · 7 Days a Week) + Gmail Auto-Delivery Setup", expanded=False):
+    st.markdown(
+      "**How This Dual Setup Works:**\n"
+      "1. **In the Gemini App (Argon High):** Copy the two clean prompts below into **Gemini ➔ Scheduled Actions** (or send them directly in Gemini chat). Because they contain dynamic instructions rather than frozen prices, Argon High will pull fresh market data and your latest `ling.angels@gmail.com` emails every single morning (including weekend Stocktwits editions).\n"
+      "2. **In This Dashboard (`stock.py`):** Click either button above to run the live 50-ticker candlestick cross-verification in full-width view, and optionally add a 16-character Google **App Password** below so the dashboard can email the report directly to `ling.angels@gmail.com`."
+    )
+    st.markdown("**Schedule 1 — 06:15 AM HKT Daily Global Anticipation & Cross-Sector Prompt:**")
+    st.code(SCHEDULE_PROMPT_0615, language="text")
+    st.markdown("**Schedule 2 — 09:15 AM HKT Daily Stocktwits & ARK Newsletter Audit Prompt:**")
+    st.code(SCHEDULE_PROMPT_0915, language="text")
+    st.markdown("---")
+    st.markdown("**Optional: Direct Gmail IMAP/SMTP Auto-Email Settings (For Dashboard Email Delivery)**")
+    em_c1, em_c2, em_c3 = st.columns([1.4, 1.4, 1.2])
+    g_usr = em_c1.text_input("Gmail Address", value=str(settings.get("gmail_user", "ling.angels@gmail.com")), key="cfg_g_usr")
+    g_app_pw = em_c2.text_input("Gmail 16-Char App Password", value=str(settings.get("gmail_app_password", "")), type="password", placeholder="xxxx xxxx xxxx xxxx", key="cfg_g_pw")
+    auto_em_chk = em_c3.checkbox("Auto-Email When Generated", value=bool(settings.get("auto_email_report", False)), key="cfg_auto_em")
+    if st.button("Save Gmail Delivery Settings", key="save_gmail_cfg"):
+      settings["gmail_user"] = g_usr.strip()
+      settings["gmail_app_password"] = g_app_pw.strip()
+      settings["report_email_to"] = g_usr.strip()
+      settings["auto_email_report"] = bool(auto_em_chk)
+      sync_file_to_github(settings, SETTINGS_FILE)
+      st.success("Saved Gmail delivery settings!")
+
+  st.markdown("---")
+  col_macro, col_chat = st.columns([1.05, 1.45])
   with col_macro:
-    st.subheader("Sunday 8:30 PM HKT Macro Briefing")
-    if st.button("Refresh Latest Sunday Video Feed", use_container_width=True):
+    st.subheader("Macro Perspectives & Reference Feeds")
+    st.caption(" External commentary (@sds.getrich) is treated as one reference perspective—always cross-check against global macro data and chart structure.")
+    if st.button("Refresh @sds.getrich Video Feed", use_container_width=True):
       fetch_sds_latest_videos.clear()
       st.rerun()
     vids = fetch_sds_latest_videos()
@@ -1831,78 +2056,24 @@ def render_ai_copilot_tab():
         f'<a href="{v["link"]}" target="_blank" style="color:#0f291e;font-weight:700;text-decoration:none;">{v["title"]}</a></div>',
         unsafe_allow_html=True
       )
-    st.markdown("#### 3-Month Macro Thesis Synthesis")
-    with st.expander("1. AI Capex & Private-Credit Debt Bubble (CoreWeave / Oracle)", expanded=True):
+    st.markdown("#### Key Macro Themes Under Watch")
+    with st.expander("1. Energy / Geopolitics Lagged Inflation & Asian/European Currency Stress", expanded=True):
       st.write(
-        "Unlike the 2000 dot-com equity bubble, Big Tech is locked in a Game Theory prisoner's dilemma—burning free cash flow on GPUs while AI data-center landlords (CoreWeave, Oracle) borrow at 10%–15% high-yield rates packaged into pension/insurance products. Watch credit spreads and debt rollovers, and never hold blindly without a trailing stop."
+        "Even when crude oil pulls back from war spikes, energy-importing economies in Asia and Europe suffer a lagged wave of sticky imported inflation, trade-balance deterioration, and currency depreciation. Monitor `EWJ`, `EWY`, `VGK`, `JPY=X`, and `EURUSD=X` for structural weakness while favoring hard-asset and pricing-power leaders."
       )
-    with st.expander("2. Eurozone Crisis 2.0 & Capital Flight to USD Assets", expanded=False):
+    with st.expander("2. AI Capex & Private-Credit Debt Cycle vs. Cross-Sector Rotation", expanded=False):
       st.write(
-        "Europe holds $8T in USD assets and pays €260B+/yr to US cloud/AI giants while facing high energy costs and sovereign debt strain (Italy/France). Pressure on the Euro forces global capital to flee into US Treasuries and US stocks—repeating the 2009–2010 Eurozone crisis rally."
+        "Hyperscalers and data-center landlords face rising capital intensity and power/grid bottlenecks. Track where capital rotates across Defense (`ITA`), Industrials (`XLI`), Nuclear/Utilities (`URA`/`CEG`), Healthcare (`XLV`), and optical/networking upgrades (`COHR`/`LITE`)."
       )
-    with st.expander("3. Dec 2026 23-Hour US Trading & Stablecoin Liquidity Siphon", expanded=False):
-      st.write(
-        "23-hour US trading removes the Asian time-zone barrier, draining retail liquidity from Asian exchanges and shifting pricing power to US hours. As Asian investors use USD stablecoins (USDT/USDC) to buy US stocks, reserve laws force 1:1 US Treasury bill purchases—absorbing US debt while fueling US equity leaders."
-      )
-    st.markdown("#### Option 2: Daily Chief Strategist Report (06:15 AM & 09:15 AM HKT)")
-    st.caption("Generates the Second-Order Thinking + Chart Confirmation report using live candles, @sds.getrich macro, and Stocktwits/ARK emails.")
-    sr1, sr2 = st.columns(2)
-    prompt_to_send = None
-    if sr1.button("Run 06:15 AM Main Report", type="primary", use_container_width=True):
-      prompt_to_send = build_second_order_strategist_prompt(report_mode="0615_MAIN")
-    if sr2.button("Run 09:15 AM ARK/Rip Supplement", type="primary", use_container_width=True):
-      prompt_to_send = build_second_order_strategist_prompt(report_mode="0915_SUPPLEMENT")
-
-    with st.expander("Gemini Scheduled Action Setup (Wake Up at 9:00 AM with 100% Quota)", expanded=False):
-      st.markdown(
-        "**Why Option 2 Protects Your 5-Hour Gemini Quota:**\n"
-        "- **Stage 1 (`06:15 AM HKT` — 1 hr after NYSE Close):** Runs the heavy Second-Order Thinking + Chart Confirmation report while you sleep. By the time you wake up at 9:00 AM, your 5-hour Gemini quota is already mostly replenished (and 100% full by 11:15 AM).\n"
-        "- **Stage 2 (`09:15 AM HKT` — After Stocktwits 08:02 AM & ARK 09:15 AM emails arrive):** Reads `newsletter@thedailyrip.stocktwits.com` and `tradingdesk@arkfunds.com` in your `ling.angels@gmail.com` inbox and cross-checks ARK's buys/sells against your chart levels."
-      )
-      st.code(
-        "Every Tuesday to Saturday at 06:15 AM HKT, generate my Daily Chief Strategist Report in Cantonese/Traditional Chinese using Second-Order Thinking and Chart Confirmation: "
-        "(1) Synthesize @sds.getrich latest macro thesis and compare EWJ vs EWY chart levels for short/hedge setups; "
-        "(2) Analyze top US tech/AI news and cross-check competitors (NVDA vs AMD, MU, INTC, AVGO) using daily candle closes, 20-EMA, 150-SMA, and RVOL to separate true beneficiaries from value traps; "
-        "(3) Analyze policy/infrastructure second-order winners (VRT, COHR, LITE, PLTR); "
-        "(4) Check my Gmail (from:thedailyrip.stocktwits.com OR from:arkfunds.com) and give exact Buy Trigger, Stop-Loss, Target, and Potential R/R.",
-        language="text"
-      )
-
-    st.markdown("**Quick Macro & Portfolio Prompts:**")
+    st.markdown("**Quick Interactive Prompts:**")
     qp1, qp2 = st.columns(2)
-    if qp1.button("Review My Open Positions", use_container_width=True):
-      prompt_to_send = "Review my current active positions, unrealized P&L, and stop-losses. Which positions need stop adjustments or partial profit-taking right now?"
-    if qp2.button("Macro & Bull 2/3 Strategy", use_container_width=True):
-      prompt_to_send = "How should I position my portfolio right now given the Bull 2 to Bull 3 rate-cycle transition, the AI debt cycle, and 23-hour US trading liquidity flows?"
+    prompt_to_send = None
+    if qp1.button("Audit My Open Positions", use_container_width=True):
+      prompt_to_send = "Review my current open positions, unrealized P&L, and stop-losses in English. Which positions need stop adjustments, partial profit-taking, or rotation right now?"
+    if qp2.button("Global Macro & Sector Anticipation", use_container_width=True):
+      prompt_to_send = "Using second-order anticipation in English, analyze how current oil/inflation/currency trends in Asia and Europe and US policy shifts will impact all 11 sectors over the next 3-6 months, and which watchlist stocks have the strongest chart confirmation."
   with col_chat:
-    st.subheader("Gemini Co-Pilot Chat")
-    mc1, mc2 = st.columns([1.45, 1.0])
-    model_choice = mc1.selectbox(
-      "AI Model Engine",
-      [
-        "auto",
-        "gemini-2.5-pro",
-        "gemini-3.1-pro-preview",
-        "gemini-2.5-flash"
-      ],
-      index=0,
-      format_func=lambda x: {
-        "auto": "Auto (Best Pro / High-Thinking Available)",
-        "gemini-2.5-pro": "Gemini 2.5 Pro (Deep Reasoning · Free Tier)",
-        "gemini-3.1-pro-preview": "Gemini 3.1 Pro Preview (Max Intelligence)",
-        "gemini-2.5-flash": "Gemini 2.5 Flash (Fast + Thinking)"
-      }[x]
-    )
-    thinking_choice = mc2.selectbox(
-      "Thinking Depth",
-      ["HIGH", "MEDIUM", "LOW"],
-      index=0,
-      format_func=lambda x: {
-        "HIGH": "High Thinking (Deep)",
-        "MEDIUM": "Medium Thinking",
-        "LOW": "Low Thinking (Fast)"
-      }[x]
-    )
+    st.subheader("Interactive Co-Pilot Chat")
     curr_key = get_gemini_api_key()
     with st.expander("Gemini API Key Settings" if curr_key else "Enter Gemini API Key to Enable Chat", expanded=not bool(curr_key)):
       in_key = st.text_input("Gemini API Key (from Google AI Studio)", value=curr_key, type="password", key="gem_key_in")
@@ -1911,32 +2082,14 @@ def render_ai_copilot_tab():
         save_json(SETTINGS_FILE, settings)
         st.success("API Key saved!")
         st.rerun()
-    pos_summary = []
-    for p in positions:
-      pos_summary.append(f"{p['Ticker']}: {p['Shares']} shs @ ${p['BuyPrice']:.2f}, Stop ${p['StopLoss']:.2f}, +15% Target ${p['Target15']:.2f}, Remarks: {p.get('Remarks', '')}")
-    monitored_tks = get_all_monitored_tickers()[:35]
-    live_snap = fetch_batch_market_data(monitored_tks, account_size=settings["account_size"])
-    tech_lines = []
-    for sym_k, rec_v in list(live_snap.items())[:30]:
-      tech_lines.append(
-        f"{sym_k}: Price ${rec_v['Price']:.2f} ({rec_v['Change_Pct']:+.2f}%), "
-        f"Playbook={rec_v['TCT_Model']}, Action={rec_v['TCT_Action']}, "
-        f"Trigger=${rec_v['BOS_Level']:.2f}, Target=${rec_v['Target_Price']:.2f}, "
-        f"Stop=${rec_v['Stop_Price']:.2f}, Pot_RR={rec_v.get('Potential_RR', rec_v['R_Multiple']):.2f}R, "
-        f"SMA150=${rec_v['SMA150_Val']:.2f}, EMA20=${rec_v['EMA20_Val']:.2f}, RSI={rec_v['RSI']:.1f}, RS_vs_SPY={rec_v['RS_Diff']:+.1f}%"
-      )
-    port_ctx = (
-      "OPEN POSITIONS:\n" + ("\n".join(pos_summary) if pos_summary else "None open.") +
-      "\n\nWATCHLIST LIVE TECHNICALS:\n" + ("\n".join(tech_lines) if tech_lines else "No watchlist data loaded.")
-    )
-    chat_box = st.container(height=420)
+    chat_box = st.container(height=460)
     with chat_box:
       if not st.session_state.chat_messages:
-        st.info("Ask me anything about your Active Positions, Watchlist setups, exact stop/target levels, the Bull 1-2-3 / Bear 1-2-3 rate cycle, or the Sunday macro thesis!")
+        st.info("Ask any follow-up question here, or use the two buttons at the top of the page to generate the Full-Width Daily Chief Strategist Report!")
       for m in st.session_state.chat_messages:
         with st.chat_message(m["role"]):
           st.markdown(m["content"])
-    user_q = st.chat_input("Ask about stocks, your portfolio stops, or macroeconomy...")
+    user_q = st.chat_input("Ask about macro anticipation, sector rotation, or any stock chart...")
     active_prompt = prompt_to_send or user_q
     if active_prompt:
       st.session_state.chat_messages.append({"role": "user", "content": active_prompt})
@@ -1951,19 +2104,18 @@ def render_ai_copilot_tab():
       st.rerun()
     if st.session_state.chat_messages:
       act_c1, act_c2, act_c3 = st.columns(3)
-      if act_c1.button("Send Last Report to ntfy/TG", use_container_width=True, key="push_last_rep"):
+      if act_c1.button("Open Last Reply in Full-Width Reader", use_container_width=True, key="expand_last_rep"):
         last_assist = [m["content"] for m in st.session_state.chat_messages if m["role"] == "assistant"]
         if last_assist:
-          ok_p, msg_p = send_ntfy_alert(last_assist[-1][:3800], "AI Chief Strategist Report")
-          if ok_p:
-            st.success(f"Pushed: {msg_p}")
-          else:
-            st.error(msg_p)
-      if act_c2.button("Email Last Report (Gmail)", use_container_width=True, key="email_last_rep"):
+          st.session_state["strategist_report"] = last_assist[-1]
+          st.session_state["strategist_report_title"] = f"Co-Pilot Deep Analysis ({datetime.now().strftime('%Y-%m-%d %H:%M')})"
+          save_json(REPORT_CACHE_FILE, {"title": st.session_state["strategist_report_title"], "body": last_assist[-1]})
+          st.rerun()
+      if act_c2.button("Email Last Reply (Gmail)", use_container_width=True, key="email_last_rep"):
         last_assist = [m["content"] for m in st.session_state.chat_messages if m["role"] == "assistant"]
         if last_assist:
           ok_e, msg_e = send_strategist_email_report(
-            f"AI Chief Strategist Report ({datetime.now().strftime('%Y-%m-%d %H:%M')})",
+            f"AI Chief Strategist Analysis ({datetime.now().strftime('%Y-%m-%d %H:%M')})",
             last_assist[-1]
           )
           if ok_e:
@@ -1973,6 +2125,7 @@ def render_ai_copilot_tab():
       if act_c3.button("Clear Chat History", use_container_width=True, key="clr_chat_btn"):
         st.session_state.chat_messages = []
         st.rerun()
+
 MACRO_SYMBOLS = {
   "S&P 500": "^GSPC", "Dow Jones": "^DJI", "Nasdaq": "^IXIC", "VIX": "^VIX",
   "Gold": "GC=F", "Silver": "SI=F", "Copper": "HG=F",
