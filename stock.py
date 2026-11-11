@@ -398,7 +398,7 @@ def _safe_parallel_map(fn, items, max_workers=2):
   except Exception:
     return [fn(x) for x in items]
 
-@st.cache_data(ttl=600)
+@st.cache_data(ttl=600, show_spinner=False)
 def fetch_google_news_rss(query, max_items=60, max_age_hours=72):
   queries = [f"{query} when:3d", "S&P 500 Nasdaq stock market today when:3d", "Wall Street stocks earnings Federal Reserve when:3d", "US tech stocks semiconductors market news when:3d"]
   pool, seen_links, seen_titles = [], set(), set()
@@ -410,7 +410,7 @@ def fetch_google_news_rss(query, max_items=60, max_age_hours=72):
         seen_links.add(item["link"]); seen_titles.add(norm_t); pool.append(item)
   return sorted(pool, key=lambda x: x["timestamp"], reverse=True)[:max_items]
 
-@st.cache_data(ttl=600)
+@st.cache_data(ttl=600, show_spinner=False)
 def fetch_watchlist_news_pool(tickers, max_items=60, max_age_hours=72):
   if not tickers:
     return []
@@ -428,7 +428,7 @@ def fetch_watchlist_news_pool(tickers, max_items=60, max_age_hours=72):
         seen_links.add(item["link"]); seen_titles.add(norm_t); pool.append(item)
   return sorted(pool, key=lambda x: x["timestamp"], reverse=True)[:max_items]
 
-@st.cache_data(ttl=600)
+@st.cache_data(ttl=600, show_spinner=False)
 def fetch_metals_crypto_fx_news(max_items=50, max_age_hours=72):
   queries = [("gold silver copper prices commodities market when:3d", "METALS"), ("Bitcoin Ethereum Solana XRP crypto market when:3d", "CRYPTO"), ("US Dollar Index DXY USD JPY EUR USD forex when:3d", "FX/USD")]
   pool, seen_links, seen_titles = [], set(), set()
@@ -440,7 +440,7 @@ def fetch_metals_crypto_fx_news(max_items=50, max_age_hours=72):
         seen_links.add(item["link"]); seen_titles.add(norm_t); pool.append(item)
   return sorted(pool, key=lambda x: x["timestamp"], reverse=True)[:max_items]
 
-@st.cache_data(ttl=14400)
+@st.cache_data(ttl=14400, show_spinner=False)
 def fetch_upcoming_earnings_map(tickers):
   if not tickers:
     return {}
@@ -601,62 +601,62 @@ def analyze_six_playbooks(df, account_size=100000, spy_ret_63d=0.0, df_1h=None):
   if tct_valid_range and range_high and bos_level and tap3_price:
     playbook_name = "Playbook 1: TCT Bottom Box"
     playbook_cat = "TCT"
-    entry_ref = curr_close if curr_close >= bos_level else bos_level
+    entry_ref = float(bos_level)
     effective_stop = max(min(tap3_price - (0.5 * atr14_1h_est), entry_ref * 0.98), entry_ref * 0.93)
-    target_price = range_high
+    target_price = max(float(range_high), entry_ref + 2.0 * (entry_ref - effective_stop))
   elif is_stage2_higher_low:
     playbook_name = "Playbook 7: Stage 2 Higher Low"
     playbook_cat = "STAGE2_HL"
     bos_level = max(float(high_arr[-2]), curr_close) if curr_close < prev_close else curr_close
-    entry_ref = curr_close
-    effective_stop = max(min(recent_pb_low - 0.35 * atr14_daily, sma150), curr_close * 0.935)
+    entry_ref = float(bos_level)
+    effective_stop = max(min(recent_pb_low - 0.35 * atr14_daily, sma150), entry_ref * 0.935)
     target_price = max(high_20d_curr * 1.03, entry_ref + 2.5 * (entry_ref - effective_stop))
   elif is_150ma_reversal_radar:
     playbook_name = "Playbook 8: 150-MA Reversal Radar"
     playbook_cat = "REVERSAL_150"
     bos_level = high_5d_prev if curr_close < high_5d_prev else curr_close
-    entry_ref = curr_close
-    effective_stop = max(sma150 - 0.5 * atr14_daily, curr_close * 0.93)
-    target_price = entry_ref + 2.5 * (entry_ref - effective_stop)
+    entry_ref = float(bos_level)
+    effective_stop = max(min(sma150 - 0.5 * atr14_daily, entry_ref * 0.975), entry_ref * 0.93)
+    target_price = max(high_20d_curr * 1.02, entry_ref + 2.5 * (entry_ref - effective_stop))
   elif is_20d_breakout:
     playbook_name = "Playbook 2: 20D Momentum Breakout"
     playbook_cat = "BREAKOUT"
-    bos_level = high_20d_prev
-    entry_ref = curr_close
-    effective_stop = max(min(ema20, curr_close - 1.5 * atr14_daily), curr_close * 0.94)
+    bos_level = curr_close if curr_close >= high_20d_prev else high_20d_prev
+    entry_ref = float(bos_level)
+    effective_stop = max(min(ema20, entry_ref - 1.5 * atr14_daily), entry_ref * 0.94)
     target_price = entry_ref + 2.5 * (entry_ref - effective_stop)
   elif is_gap_ignition:
     playbook_name = "Playbook 6: High-Vol Gap Ignition"
     playbook_cat = "BREAKOUT"
     bos_level = float(high_arr[-1]) if curr_close < high_arr[-1] else curr_close
-    entry_ref = curr_close
-    effective_stop = max(float(low_arr[-1]) - 0.2 * atr14_daily, curr_close * 0.94)
+    entry_ref = float(bos_level)
+    effective_stop = max(float(low_arr[-1]) - 0.2 * atr14_daily, entry_ref * 0.94)
     target_price = entry_ref + 2.5 * (entry_ref - effective_stop)
   elif is_squeeze_breakout:
     playbook_name = "Playbook 4: Volatility Squeeze Coil"
     playbook_cat = "SWING_PULLBACK"
-    bos_level = high_3d_prev
-    entry_ref = curr_close
-    effective_stop = max(low_3d - 0.3 * atr14_daily, curr_close * 0.95)
+    bos_level = curr_close if curr_close >= high_3d_prev else high_3d_prev
+    entry_ref = float(bos_level)
+    effective_stop = max(low_3d - 0.3 * atr14_daily, entry_ref * 0.95)
     target_price = entry_ref + 2.8 * (entry_ref - effective_stop)
   elif is_holy_grail_pullback:
     playbook_name = "Playbook 3: 20-EMA Pullback Swing"
     playbook_cat = "SWING_PULLBACK"
     bos_level = max(float(high_arr[-2]), curr_close) if curr_close < prev_close else curr_close
-    entry_ref = curr_close
-    effective_stop = max(min(low_3d, ema20) - 0.5 * atr14_daily, curr_close * 0.95)
-    target_price = max(high_20d_prev, entry_ref + 2.4 * (entry_ref - effective_stop))
+    entry_ref = float(bos_level)
+    effective_stop = max(min(low_3d, ema20) - 0.5 * atr14_daily, entry_ref * 0.95)
+    target_price = max(high_20d_prev * 1.02, entry_ref + 2.4 * (entry_ref - effective_stop))
   elif is_rsi2_snapback:
     playbook_name = f"Playbook 5: RSI-2 Oversold Bounce (RSI2={rsi2:.0f})"
     playbook_cat = "OVERSOLD"
     bos_level = curr_close
-    entry_ref = curr_close
-    effective_stop = max(curr_close - 1.5 * atr14_daily, curr_close * 0.945)
+    entry_ref = float(bos_level)
+    effective_stop = max(entry_ref - 1.5 * atr14_daily, entry_ref * 0.945)
     target_price = max(ema20, entry_ref + 2.0 * (entry_ref - effective_stop))
   else:
     playbook_name = "Standard Trend Swing"
     bos_level = curr_close if curr_close >= high_5d_prev else high_5d_prev
-    entry_ref = curr_close if curr_close >= bos_level else bos_level
+    entry_ref = float(bos_level)
     effective_stop = max(min(entry_ref - 1.5 * atr14_daily, entry_ref * 0.978), entry_ref * 0.935)
     target_price = entry_ref + 2.5 * (entry_ref - effective_stop)
   risk_per_share = max(entry_ref - effective_stop, 0.0001)
@@ -824,11 +824,9 @@ def _extract_ticker_df(data, ticker, total_tickers):
     return data.xs(ticker, axis=1, level=1).copy()
   return pd.DataFrame()
 
-@st.cache_data(ttl=120)
-def fetch_batch_market_data(tickers, account_size=100000, refresh_bucket=0):
-  clean_tickers = [str(t).strip().upper() for t in tickers if str(t).strip()]
-  pos_tickers = [str(p["Ticker"]).strip().upper() for p in positions if str(p.get("Ticker")).strip()]
-  clean_tickers = list(dict.fromkeys(clean_tickers + pos_tickers))
+@st.cache_data(ttl=120, show_spinner=False)
+def _fetch_batch_market_data_cached(clean_tickers_tuple, account_size=100000, w_fund_pct=40, w_tech_pct=40, w_mom_pct=20, refresh_bucket=0):
+  clean_tickers = list(clean_tickers_tuple)
   if not clean_tickers:
     return {}
   download_list = list(dict.fromkeys(clean_tickers + ["^GSPC"]))
@@ -842,7 +840,7 @@ def fetch_batch_market_data(tickers, account_size=100000, refresh_bucket=0):
       except Exception:
         data_intraday = None
   except Exception:
-    return st.session_state.get("last_good_data", {})
+    return {}
   spy_ret_63d = 0.0
   try:
     spy_df = _extract_ticker_df(data, "^GSPC", len(download_list)).dropna(subset=["Close"])
@@ -850,7 +848,7 @@ def fetch_batch_market_data(tickers, account_size=100000, refresh_bucket=0):
       spy_ret_63d = ((float(spy_df["Close"].iloc[-1]) - float(spy_df["Close"].iloc[-64])) / float(spy_df["Close"].iloc[-64])) * 100.0
   except Exception:
     pass
-  w_fund, w_tech, w_mom = settings["w_fund"] / 100.0, settings["w_tech"] / 100.0, settings["w_mom"] / 100.0
+  w_fund, w_tech, w_mom = w_fund_pct / 100.0, w_tech_pct / 100.0, w_mom_pct / 100.0
   results = {}
   for t in clean_tickers:
     try:
@@ -949,31 +947,57 @@ def fetch_batch_market_data(tickers, account_size=100000, refresh_bucket=0):
       results[t] = record
     except Exception:
       continue
-  if results:
-    st.session_state.last_good_data.update(results)
-    check_and_fire_live_ntfy(results)
-    check_and_fire_active_position_alerts(results)
-  else:
-    return {k: v for k, v in st.session_state.get("last_good_data", {}).items() if k in clean_tickers}
   return results
 
-@st.cache_data(ttl=180)
+def fetch_batch_market_data(tickers, account_size=100000, refresh_bucket=0):
+  clean_tickers = [str(t).strip().upper() for t in tickers if str(t).strip()]
+  pos_tickers = [str(p["Ticker"]).strip().upper() for p in positions if str(p.get("Ticker")).strip()]
+  clean_tickers = list(dict.fromkeys(clean_tickers + pos_tickers))
+  if not clean_tickers:
+    return {}
+  results = _fetch_batch_market_data_cached(
+    tuple(clean_tickers),
+    account_size=account_size,
+    w_fund_pct=int(settings.get("w_fund", 40)),
+    w_tech_pct=int(settings.get("w_tech", 40)),
+    w_mom_pct=int(settings.get("w_mom", 20)),
+    refresh_bucket=refresh_bucket
+  )
+  if results:
+    if "last_good_data" in st.session_state:
+      st.session_state.last_good_data.update(results)
+    check_and_fire_live_ntfy(results)
+    check_and_fire_active_position_alerts(results)
+    return results
+  return {k: v for k, v in st.session_state.get("last_good_data", {}).items() if k in clean_tickers}
+
+@st.cache_data(ttl=180, show_spinner=False)
+def _fetch_single_ticker_history_cached(sym, period="5y", interval="1d"):
+  try:
+    t = yf.Ticker(sym)
+    df = t.history(period=period, interval=interval)
+    if df is None or df.empty or len(df) < 10:
+      return None, None
+    try:
+      df_1h = t.history(period="1mo", interval="1h")
+    except Exception:
+      df_1h = None
+    return df, df_1h
+  except Exception:
+    return None, None
+
 def fetch_single_ticker_data(sym, account_size=100000, period="5y", interval="1d"):
   res = fetch_batch_market_data([sym], account_size=account_size)
   base_rec = res.get(sym) if sym in res else None
   if period == "1y" and interval == "1d" and base_rec is not None and "EMA150" in base_rec["History"].columns:
     return base_rec
+  df_raw, df_1h = _fetch_single_ticker_history_cached(sym, period=period, interval=interval)
+  if (df_raw is None or df_raw.empty or len(df_raw) < 20) and base_rec is not None:
+    return base_rec
+  if df_raw is None or df_raw.empty or len(df_raw) < 10:
+    return None
   try:
-    t = yf.Ticker(sym)
-    df = t.history(period=period, interval=interval)
-    if (df is None or df.empty or len(df) < 20) and base_rec is not None:
-      return base_rec
-    if df is None or df.empty or len(df) < 10:
-      return None
-    try:
-      df_1h = t.history(period="1mo", interval="1h")
-    except Exception:
-      df_1h = None
+    df = df_raw.copy()
     close = float(df["Close"].iloc[-1])
     prev_close = float(df["Close"].iloc[-2]) if len(df) >= 2 else close
     df["EMA20"] = df["Close"].ewm(span=20, adjust=False).mean()
@@ -1013,7 +1037,7 @@ def fetch_single_ticker_data(sym, account_size=100000, period="5y", interval="1d
   except Exception:
     return base_rec
 
-@st.cache_data(ttl=14400)
+@st.cache_data(ttl=14400, show_spinner=False)
 def fetch_ticker_fundamentals(ticker_symbol):
   data = {
     "Company Name": ticker_symbol, "Market Cap": "N/A", "Trailing P/E": "N/A",
@@ -1460,7 +1484,7 @@ def render_active_positions_manager(key_prefix="ap"):
   else:
     st.caption("No ledger entries found in the selected date range.")
 
-@st.cache_data(ttl=1800)
+@st.cache_data(ttl=1800, show_spinner=False)
 def fetch_sds_latest_videos():
   videos = []
   rss_urls = [
@@ -1506,70 +1530,119 @@ def get_gemini_api_key():
     pass
   return os.environ.get("GEMINI_API_KEY", "").strip() or str(settings.get("gemini_api_key", "")).strip()
 
-def query_gemini_copilot(user_prompt, chat_history, portfolio_context):
+def query_gemini_copilot(user_prompt, chat_history, portfolio_context, model_pref="auto", thinking_level="HIGH"):
   api_key = get_gemini_api_key()
   if not api_key:
     return "Please enter your **Gemini API Key** in the box above (or add `GEMINI_API_KEY` to your Streamlit Secrets) to activate live AI chat."
   sys_text = (
-    "You are the user's personal AI Macro & Trading Co-Pilot embedded inside their Quality Momentum & Stage 2 Cockpit. "
-    "Be direct, insightful, and practical. You have full knowledge of their live portfolio, watchlist signals, "
+    "You are an institutional-grade AI Macro & Quantitative Trading Co-Pilot embedded inside the user's Quality Momentum & Stage 2 Cockpit. "
+    "Provide deep, rigorous, structured analysis with exact price levels, stop-loss math, R-multiples, and macro regime reasoning. "
+    "You have full knowledge of their live portfolio, watchlist technical signals across all 8 Playbooks, "
     "the 6-Phase Fed Interest Rate Cycle (Bull 1 Stop Cutting -> Bull 2 First Hike -> Bull 3 Hike Pause/Expansion -> Bear 1 First Cut), "
     "and the 3-month macro synthesis from @sds.getrich (1. AI capex & private-credit debt bubble in CoreWeave/Oracle; "
     "2. Eurozone Crisis 2.0 driving capital flight into USD assets; 3. Dec 2026 23-hour US trading & USDT/USDC stablecoins "
     "draining Asian liquidity into US stocks and T-bills; 4. Hit-and-run profit management: buying Stage 2 Higher Lows, "
-    "selling 50% at +15%, and trailing stops).\n\n"
-    f"LIVE DASHBOARD CONTEXT:\n{portfolio_context}"
+    "selling 50% at +15%, and trailing stops above the 20-EMA).\n\n"
+    f"LIVE DASHBOARD & TECHNICAL CONTEXT:\n{portfolio_context}"
   )
   contents = []
-  for msg in chat_history[-8:]:
+  for msg in chat_history[-10:]:
     role = "user" if msg["role"] == "user" else "model"
     contents.append({"role": role, "parts": [{"text": msg["content"]}]})
   contents.append({"role": "user", "parts": [{"text": user_prompt}]})
-  payload = {
-    "systemInstruction": {"parts": [{"text": sys_text}]},
-    "contents": contents,
-    "generationConfig": {"temperature": 0.4, "maxOutputTokens": 1200}
-  }
-  candidate_models = [
-    "gemini-1.5-flash",
-    "gemini-2.0-flash",
-    "gemini-1.5-flash-latest",
-    "gemini-1.5-pro",
-    "gemini-2.5-flash"
-  ]
+
+  discovered = []
   try:
     list_url = f"https://generativelanguage.googleapis.com/v1beta/models?key={api_key}"
     with urllib.request.urlopen(urllib.request.Request(list_url), timeout=8) as resp_l:
       models_data = json.loads(resp_l.read().decode("utf-8")).get("models", [])
-      discovered = []
       for m_info in models_data:
         m_name = str(m_info.get("name", "")).replace("models/", "")
         methods = m_info.get("supportedGenerationMethods", [])
-        if "generateContent" in methods and "gemini" in m_name.lower():
+        if "generateContent" in methods and "gemini" in m_name.lower() and "vision" not in m_name.lower():
           discovered.append(m_name)
-      if discovered:
-        flash_first = sorted(discovered, key=lambda x: (0 if "1.5-flash" in x else (1 if "flash" in x else 2)))
-        candidate_models = list(dict.fromkeys(flash_first + candidate_models))
   except Exception:
     pass
+
+  def _score_model_pro_first(m_str):
+    ml = m_str.lower()
+    if "lite" in ml:
+      return 90
+    if "3.1-pro" in ml:
+      return 1
+    if "2.5-pro" in ml:
+      return 2
+    if "pro" in ml:
+      return 3
+    if "3.8-flash" in ml or "3.5-flash" in ml or "3-flash" in ml:
+      return 4
+    if "2.5-flash" in ml:
+      return 5
+    if "2.0-flash" in ml or "1.5-flash" in ml:
+      return 6
+    return 50
+
+  pro_sorted = sorted(discovered, key=_score_model_pro_first) if discovered else []
+  default_fallbacks = [
+    "gemini-2.5-pro",
+    "gemini-2.5-flash",
+    "gemini-2.0-flash",
+    "gemini-1.5-pro",
+    "gemini-1.5-flash"
+  ]
+  if model_pref and model_pref != "auto":
+    candidate_models = list(dict.fromkeys([model_pref] + pro_sorted + default_fallbacks))
+  else:
+    candidate_models = list(dict.fromkeys(pro_sorted + default_fallbacks))
+
+  budget_map = {"HIGH": 8192, "MEDIUM": 2048, "LOW": 512}
+  t_budget = budget_map.get(thinking_level, 8192)
 
   last_err = ""
   for model_name in candidate_models:
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={api_key}"
-    try:
-      req = urllib.request.Request(
-        url,
-        data=json.dumps(payload).encode("utf-8"),
-        headers={"Content-Type": "application/json"},
-        method="POST"
-      )
-      with urllib.request.urlopen(req, timeout=25) as resp:
-        res_json = json.loads(resp.read().decode("utf-8"))
-        return res_json["candidates"][0]["content"]["parts"][0]["text"]
-    except Exception as e:
-      last_err = str(e)
-      continue
-  return f"Gemini API Error: {last_err[:180]}"
+    gen_configs_to_try = []
+    if any(k in model_name.lower() for k in ("3.1", "3.0", "3-", "3.5", "3.8")):
+      gen_configs_to_try.append({
+        "temperature": 0.35,
+        "maxOutputTokens": 16384,
+        "thinkingConfig": {"thinkingLevel": thinking_level}
+      })
+    if any(k in model_name.lower() for k in ("2.5", "3.1", "3.5", "3.8", "thinking")):
+      gen_configs_to_try.append({
+        "temperature": 0.35,
+        "maxOutputTokens": 16384,
+        "thinkingConfig": {"thinkingBudget": t_budget}
+      })
+    gen_configs_to_try.append({
+      "temperature": 0.35,
+      "maxOutputTokens": 8192
+    })
+
+    for g_cfg in gen_configs_to_try:
+      payload = {
+        "systemInstruction": {"parts": [{"text": sys_text}]},
+        "contents": contents,
+        "generationConfig": g_cfg
+      }
+      try:
+        req = urllib.request.Request(
+          url,
+          data=json.dumps(payload).encode("utf-8"),
+          headers={"Content-Type": "application/json"},
+          method="POST"
+        )
+        with urllib.request.urlopen(req, timeout=45) as resp:
+          res_json = json.loads(resp.read().decode("utf-8"))
+          parts = res_json["candidates"][0]["content"]["parts"]
+          ans_chunks = [p.get("text", "") for p in parts if not p.get("thought", False) and p.get("text")]
+          final_text = "\n".join(ans_chunks).strip() if ans_chunks else parts[-1].get("text", "")
+          mode_tag = f"Thinking: {thinking_level}" if "thinkingConfig" in g_cfg else "Standard"
+          return f"{final_text}\n\n---\n*Engine: `{model_name}` · {mode_tag}*"
+      except Exception as e:
+        last_err = str(e)
+        continue
+  return f"Gemini API Error: {last_err[:200]}"
 
 def render_ai_copilot_tab():
   st.markdown("<h1>AI Macro & Trade Co-Pilot</h1>", unsafe_allow_html=True)
@@ -1624,6 +1697,33 @@ def render_ai_copilot_tab():
       prompt_to_send = "How should I position my portfolio right now given the Bull 2 to Bull 3 rate-cycle transition, the AI debt cycle, and 23-hour US trading liquidity flows?"
   with col_chat:
     st.subheader("Gemini Co-Pilot Chat")
+    mc1, mc2 = st.columns([1.45, 1.0])
+    model_choice = mc1.selectbox(
+      "AI Model Engine",
+      [
+        "auto",
+        "gemini-2.5-pro",
+        "gemini-3.1-pro-preview",
+        "gemini-2.5-flash"
+      ],
+      index=0,
+      format_func=lambda x: {
+        "auto": "Auto (Best Pro / High-Thinking Available)",
+        "gemini-2.5-pro": "Gemini 2.5 Pro (Deep Reasoning · Free Tier)",
+        "gemini-3.1-pro-preview": "Gemini 3.1 Pro Preview (Max Intelligence)",
+        "gemini-2.5-flash": "Gemini 2.5 Flash (Fast + Thinking)"
+      }[x]
+    )
+    thinking_choice = mc2.selectbox(
+      "Thinking Depth",
+      ["HIGH", "MEDIUM", "LOW"],
+      index=0,
+      format_func=lambda x: {
+        "HIGH": "High Thinking (Deep)",
+        "MEDIUM": "Medium Thinking",
+        "LOW": "Low Thinking (Fast)"
+      }[x]
+    )
     curr_key = get_gemini_api_key()
     with st.expander("Gemini API Key Settings" if curr_key else "Enter Gemini API Key to Enable Chat", expanded=not bool(curr_key)):
       in_key = st.text_input("Gemini API Key (from Google AI Studio)", value=curr_key, type="password", key="gem_key_in")
@@ -1634,12 +1734,26 @@ def render_ai_copilot_tab():
         st.rerun()
     pos_summary = []
     for p in positions:
-      pos_summary.append(f"{p['Ticker']}: {p['Shares']} shs @ ${p['BuyPrice']:.2f}, Stop ${p['StopLoss']:.2f}, Remarks: {p.get('Remarks', '')}")
-    port_ctx = "Active Positions: " + ("; ".join(pos_summary) if pos_summary else "None open.")
+      pos_summary.append(f"{p['Ticker']}: {p['Shares']} shs @ ${p['BuyPrice']:.2f}, Stop ${p['StopLoss']:.2f}, +15% Target ${p['Target15']:.2f}, Remarks: {p.get('Remarks', '')}")
+    monitored_tks = get_all_monitored_tickers()[:35]
+    live_snap = fetch_batch_market_data(monitored_tks, account_size=settings["account_size"])
+    tech_lines = []
+    for sym_k, rec_v in list(live_snap.items())[:30]:
+      tech_lines.append(
+        f"{sym_k}: Price ${rec_v['Price']:.2f} ({rec_v['Change_Pct']:+.2f}%), "
+        f"Playbook={rec_v['TCT_Model']}, Action={rec_v['TCT_Action']}, "
+        f"Trigger=${rec_v['BOS_Level']:.2f}, Target=${rec_v['Target_Price']:.2f}, "
+        f"Stop=${rec_v['Stop_Price']:.2f}, Pot_RR={rec_v.get('Potential_RR', rec_v['R_Multiple']):.2f}R, "
+        f"SMA150=${rec_v['SMA150_Val']:.2f}, EMA20=${rec_v['EMA20_Val']:.2f}, RSI={rec_v['RSI']:.1f}, RS_vs_SPY={rec_v['RS_Diff']:+.1f}%"
+      )
+    port_ctx = (
+      "OPEN POSITIONS:\n" + ("\n".join(pos_summary) if pos_summary else "None open.") +
+      "\n\nWATCHLIST LIVE TECHNICALS:\n" + ("\n".join(tech_lines) if tech_lines else "No watchlist data loaded.")
+    )
     chat_box = st.container(height=420)
     with chat_box:
       if not st.session_state.chat_messages:
-        st.info("Ask me anything about your Active Positions, Watchlist setups, the Bull 1-2-3 / Bear 1-2-3 rate cycle, or the Sunday macro thesis!")
+        st.info("Ask me anything about your Active Positions, Watchlist setups, exact stop/target levels, the Bull 1-2-3 / Bear 1-2-3 rate cycle, or the Sunday macro thesis!")
       for m in st.session_state.chat_messages:
         with st.chat_message(m["role"]):
           st.markdown(m["content"])
@@ -1647,7 +1761,13 @@ def render_ai_copilot_tab():
     active_prompt = prompt_to_send or user_q
     if active_prompt:
       st.session_state.chat_messages.append({"role": "user", "content": active_prompt})
-      reply = query_gemini_copilot(active_prompt, st.session_state.chat_messages[:-1], port_ctx)
+      reply = query_gemini_copilot(
+        active_prompt,
+        st.session_state.chat_messages[:-1],
+        port_ctx,
+        model_pref=model_choice,
+        thinking_level=thinking_choice
+      )
       st.session_state.chat_messages.append({"role": "assistant", "content": reply})
       st.rerun()
     if st.session_state.chat_messages:
@@ -1660,7 +1780,7 @@ MACRO_SYMBOLS = {
   "DXY (USD)": "DX-Y.NYB", "USD/JPY": "JPY=X", "Bitcoin": "BTC-USD", "Ethereum": "ETH-USD"
 }
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=300, show_spinner=False)
 def fetch_macro_and_regime():
   ticks = list(MACRO_SYMBOLS.values())
   out = {}
@@ -1751,16 +1871,17 @@ if st.session_state.inspect_symbol is not None:
   with c_ctrl:
     st.markdown("### Chart Timeframe")
     chart_period = st.selectbox(
-      "History Interval",
-      ["6mo", "1y", "2y", "3y", "5y", "10y", "max"],
-      index=4,
+      "Visible Window",
+      ["3mo", "6mo", "9mo", "1y", "2y", "3y", "5y", "max"],
+      index=2,
       format_func=lambda x: {
+        "3mo": "3 Months (Zoomed In)",
         "6mo": "6 Months",
+        "9mo": "9 Months (TradingView Default)",
         "1y": "1 Year",
         "2y": "2 Years",
         "3y": "3 Years",
-        "5y": "5 Years (Default)",
-        "10y": "10 Years",
+        "5y": "5 Years",
         "max": "All-Time (Max)"
       }[x]
     )
@@ -1781,13 +1902,27 @@ if st.session_state.inspect_symbol is not None:
     ma150_type = st.radio("150 MA Mode", ["SMA 150", "EMA 150"], index=0, horizontal=True, label_visibility="collapsed")
     show_ema200 = st.checkbox("EMA 200 (Purple)", value=False)
     show_bb = st.checkbox("Bollinger Bands (20, 2)", value=False)
-  d = fetch_single_ticker_data(sym, account_size=settings["account_size"], period=chart_period, interval=chart_bar_interval)
+  fetch_period = "5y" if chart_period in ("3mo", "6mo", "9mo", "1y", "2y", "3y", "5y") else "max"
+  d = fetch_single_ticker_data(sym, account_size=settings["account_size"], period=fetch_period, interval=chart_bar_interval)
   if d is not None:
-    df_hist = d["History"]
+    df_hist = d["History"].copy()
     if "EMA150" not in df_hist.columns:
       df_hist["EMA150"] = df_hist["Close"].ewm(span=150, adjust=False).mean()
     if "SMA150" not in df_hist.columns:
       df_hist["SMA150"] = df_hist["Close"].rolling(150, min_periods=1).mean()
+    last_dt_full = pd.to_datetime(df_hist.index[-1])
+    window_days_map = {
+      "3mo": 92, "6mo": 183, "9mo": 275, "1y": 366,
+      "2y": 731, "3y": 1096, "5y": 1826
+    }
+    if chart_period in window_days_map:
+      cutoff_dt = last_dt_full - pd.Timedelta(days=window_days_map[chart_period])
+      df_view = df_hist[pd.to_datetime(df_hist.index) >= cutoff_dt].copy()
+      if len(df_view) < 15:
+        df_view = df_hist.tail(min(len(df_hist), 60)).copy()
+    else:
+      df_view = df_hist.copy()
+
     raw_mcap = funds.get("Market Cap")
     mcap_text = f"${raw_mcap/1e9:.1f}B" if isinstance(raw_mcap, (int, float)) and raw_mcap > 0 else "N/A"
     ma150_val = float(df_hist["SMA150"].iloc[-1]) if ma150_type == "SMA 150" else float(df_hist["EMA150"].iloc[-1])
@@ -1842,27 +1977,39 @@ if st.session_state.inspect_symbol is not None:
       f3.metric("Buy Trigger (BOS)", f"${d['BOS_Level']:,.2f}")
       f4.metric("Take Profit Target", f"${d['Target_Price']:,.2f}", f"+{d['Target_Pct']:.1f}%")
       f5.metric("Safety Stop-Loss", f"${d['Stop_Price']:,.2f}", f"{d['Stop_Pct']:.1f}%", delta_color="inverse")
-      f6.metric("0.5% Risk Size", f"{d['Shares_05Pct']} shs", f"{d['R_Multiple']:.1f}R Reward/Risk")
-      fig = make_subplots(rows=3, cols=1, shared_xaxes=True, vertical_spacing=0.03, row_heights=[0.64, 0.18, 0.18])
-      fig.add_trace(go.Candlestick(x=df_hist.index, open=df_hist['Open'], high=df_hist['High'], low=df_hist['Low'], close=df_hist['Close'], name="Candles"), row=1, col=1)
+      f6.metric("0.5% Risk Size", f"{d['Shares_05Pct']} shs", f"{d.get('Potential_RR', d['R_Multiple']):.2f}R Potential")
+      fig = make_subplots(rows=3, cols=1, shared_xaxes=True, vertical_spacing=0.03, row_heights=[0.66, 0.17, 0.17])
+      fig.add_trace(
+        go.Candlestick(
+          x=df_view.index, open=df_view['Open'], high=df_view['High'],
+          low=df_view['Low'], close=df_view['Close'],
+          increasing_line_color="#089981", increasing_fillcolor="#089981",
+          decreasing_line_color="#f23645", decreasing_fillcolor="#f23645",
+          name="Candles"
+        ),
+        row=1, col=1
+      )
       if show_ema20:
-        fig.add_trace(go.Scatter(x=df_hist.index, y=df_hist['EMA20'], line=dict(color="#d4af37", width=1.5), name="EMA 20"), row=1, col=1)
+        fig.add_trace(go.Scatter(x=df_view.index, y=df_view['EMA20'], line=dict(color="#d4af37", width=1.5), name="EMA 20"), row=1, col=1)
       if show_ema50:
-        fig.add_trace(go.Scatter(x=df_hist.index, y=df_hist['EMA50'], line=dict(color="#15803d", width=1.5), name="EMA 50"), row=1, col=1)
+        fig.add_trace(go.Scatter(x=df_view.index, y=df_view['EMA50'], line=dict(color="#15803d", width=1.6), name="EMA 50"), row=1, col=1)
       if show_ma150:
         col_150 = "SMA150" if ma150_type == "SMA 150" else "EMA150"
-        fig.add_trace(go.Scatter(x=df_hist.index, y=df_hist[col_150], line=dict(color="#0284c7", width=2.0), name=ma150_type), row=1, col=1)
+        fig.add_trace(go.Scatter(x=df_view.index, y=df_view[col_150], line=dict(color="#0284c7", width=2.0), name=ma150_type), row=1, col=1)
       if show_ema200:
-        fig.add_trace(go.Scatter(x=df_hist.index, y=df_hist['EMA200'], line=dict(color="#7c3aed", width=1.5), name="EMA 200"), row=1, col=1)
+        fig.add_trace(go.Scatter(x=df_view.index, y=df_hist.loc[df_view.index, 'EMA200'], line=dict(color="#7c3aed", width=1.5), name="EMA 200"), row=1, col=1)
       if show_bb:
-        fig.add_trace(go.Scatter(x=df_hist.index, y=df_hist['BB_Upper'], line=dict(color="#94a3b8", width=1, dash="dot"), name="BB Upper"), row=1, col=1)
-        fig.add_trace(go.Scatter(x=df_hist.index, y=df_hist['BB_Lower'], line=dict(color="#94a3b8", width=1, dash="dot"), name="BB Lower"), row=1, col=1)
-      last_dt = pd.to_datetime(df_hist.index[-1])
+        fig.add_trace(go.Scatter(x=df_view.index, y=df_view['BB_Upper'], line=dict(color="#94a3b8", width=1, dash="dot"), name="BB Upper"), row=1, col=1)
+        fig.add_trace(go.Scatter(x=df_view.index, y=df_view['BB_Lower'], line=dict(color="#94a3b8", width=1, dash="dot"), name="BB Lower"), row=1, col=1)
+
+      first_dt = pd.to_datetime(df_view.index[0])
+      last_dt = pd.to_datetime(df_view.index[-1])
+      vis_span_days = max(30, int((last_dt - first_dt).total_seconds() / 86400.0))
       step_days = 7 if chart_bar_interval == "1wk" else 1
-      box_span_days = 140 if chart_bar_interval == "1wk" else 42
+      box_span_days = max(step_days * 12, int(vis_span_days * 0.24))
       box_start_dt = last_dt + pd.Timedelta(days=step_days * 2)
-      box_end_dt = last_dt + pd.Timedelta(days=box_span_days)
-      box_mid_dt = box_start_dt + (box_end_dt - box_start_dt) / 2
+      box_end_dt = box_start_dt + pd.Timedelta(days=box_span_days)
+
       entry_px = float(d["BOS_Level"])
       tgt_px = float(d["Target_Price"])
       stp_px = float(d["Stop_Price"])
@@ -1871,74 +2018,77 @@ if st.session_state.inspect_symbol is not None:
       pot_stp_pct = ((stp_px - entry_px) / entry_px * 100.0) if entry_px > 0 else d["Stop_Pct"]
 
       if show_rr_box:
-        # Green Profit Target Zone (Entry -> Target)
+        # Unobstructed TradingView Green Profit Zone (Entry -> Target)
         fig.add_shape(
           type="rect",
           x0=box_start_dt, x1=box_end_dt,
           y0=entry_px, y1=tgt_px,
-          fillcolor="rgba(16, 185, 129, 0.22)",
-          line=dict(color="rgba(16, 185, 129, 0.75)", width=1.5),
-          layer="above",
+          fillcolor="rgba(8, 153, 129, 0.20)",
+          line=dict(color="rgba(8, 153, 129, 0.65)", width=1.2),
+          layer="below",
           row=1, col=1
         )
-        # Red Stop-Loss Risk Zone (Stop -> Entry)
+        # Unobstructed TradingView Red Stop-Loss Zone (Stop -> Entry)
         fig.add_shape(
           type="rect",
           x0=box_start_dt, x1=box_end_dt,
           y0=stp_px, y1=entry_px,
-          fillcolor="rgba(239, 68, 68, 0.24)",
-          line=dict(color="rgba(220, 38, 38, 0.75)", width=1.5),
-          layer="above",
+          fillcolor="rgba(242, 54, 69, 0.22)",
+          line=dict(color="rgba(242, 54, 69, 0.65)", width=1.2),
+          layer="below",
           row=1, col=1
         )
-        # Crisp Entry / Buy Trigger Center Line inside Box + Dotted Connector from Last Candle
+        # Clean Entry Divider Line across the Risk/Reward Box
         fig.add_shape(
           type="line",
-          x0=last_dt - pd.Timedelta(days=step_days * 15), x1=box_end_dt,
+          x0=last_dt, x1=box_end_dt,
           y0=entry_px, y1=entry_px,
-          line=dict(color="#334155", width=1.8, dash="dot"),
+          line=dict(color="#475569", width=1.5, dash="dot"),
           row=1, col=1
         )
-        # Price & Potential R/R Labels on the TradingView Box
+        # Right-Edge Price & R/R Tags (Flush to the right of the box, leaving the box 100% clear)
         fig.add_annotation(
-          x=box_mid_dt, y=tgt_px,
-          text=f"<b>TARGET: ${tgt_px:,.2f} (+{pot_tgt_pct:.1f}%)</b>",
-          showarrow=False, yshift=11,
-          font=dict(size=11, color="#ffffff"),
-          bgcolor="#0d9488", bordercolor="#0d9488", borderwidth=1, borderpad=3,
-          row=1, col=1
-        )
-        fig.add_annotation(
-          x=box_mid_dt, y=entry_px,
-          text=f"<b>ENTRY: ${entry_px:,.2f}  ·  POTENTIAL R/R: {pot_rr_val:.2f}R</b>",
+          x=box_end_dt, y=tgt_px,
+          xanchor="left", xshift=4,
+          text=f"<b>{tgt_px:,.2f} (+{pot_tgt_pct:.1f}%)</b>",
           showarrow=False,
-          font=dict(size=10.5, color="#ffffff"),
+          font=dict(size=11, color="#ffffff"),
+          bgcolor="#089981", bordercolor="#089981", borderwidth=1, borderpad=3,
+          row=1, col=1
+        )
+        fig.add_annotation(
+          x=box_end_dt, y=entry_px,
+          xanchor="left", xshift=4,
+          text=f"<b>{entry_px:,.2f} ({pot_rr_val:.2f}R)</b>",
+          showarrow=False,
+          font=dict(size=11, color="#ffffff"),
           bgcolor="#334155", bordercolor="#334155", borderwidth=1, borderpad=3,
           row=1, col=1
         )
         fig.add_annotation(
-          x=box_mid_dt, y=stp_px,
-          text=f"<b>STOP: ${stp_px:,.2f} ({pot_stp_pct:.1f}%)</b>",
-          showarrow=False, yshift=-11,
+          x=box_end_dt, y=stp_px,
+          xanchor="left", xshift=4,
+          text=f"<b>{stp_px:,.2f} ({pot_stp_pct:.1f}%)</b>",
+          showarrow=False,
           font=dict(size=11, color="#ffffff"),
-          bgcolor="#dc2626", bordercolor="#dc2626", borderwidth=1, borderpad=3,
+          bgcolor="#f23645", bordercolor="#f23645", borderwidth=1, borderpad=3,
           row=1, col=1
         )
 
-      if show_trendline and len(df_hist) >= 40:
+      if show_trendline and len(df_view) >= 30:
         try:
-          sub_w = df_hist.iloc[-min(len(df_hist), 120):]
+          sub_w = df_view.iloc[-min(len(df_view), 140):]
           h_vals = sub_w["High"].values.astype(float)
           h_idx = sub_w.index
-          half_w = max(10, len(h_vals) // 2)
+          half_w = max(8, len(h_vals) // 2)
           p1_pos = int(np.argmax(h_vals[:half_w]))
           p2_pos = half_w + int(np.argmax(h_vals[half_w:]))
-          if p2_pos > p1_pos + 5:
+          if p2_pos > p1_pos + 4:
             x_p1, y_p1 = pd.to_datetime(h_idx[p1_pos]), float(h_vals[p1_pos])
             x_p2, y_p2 = pd.to_datetime(h_idx[p2_pos]), float(h_vals[p2_pos])
             days_12 = max(1.0, (x_p2 - x_p1).total_seconds() / 86400.0)
             slope_per_day = (y_p2 - y_p1) / days_12
-            x_ext = box_start_dt + pd.Timedelta(days=step_days * 8)
+            x_ext = box_start_dt + pd.Timedelta(days=int(box_span_days * 0.25))
             y_ext = y_p2 + slope_per_day * ((x_ext - x_p2).total_seconds() / 86400.0)
             fig.add_trace(
               go.Scatter(
@@ -1954,36 +2104,40 @@ if st.session_state.inspect_symbol is not None:
           pass
 
       if show_tct_lines:
-        fig.add_hline(y=d["Target_Price"], line_dash="dash", line_color="#15803d", line_width=1.8, annotation_text=f"TAKE PROFIT TARGET: ${d['Target_Price']:,.2f} (+{d['Target_Pct']:.1f}%)", annotation_position="top left", row=1, col=1)
-        fig.add_hline(y=d["BOS_Level"], line_dash="dot", line_color="#2563eb", line_width=1.6, annotation_text=f"BUY TRIGGER: ${d['BOS_Level']:,.2f}", annotation_position="bottom left", row=1, col=1)
-        fig.add_hline(y=d["Stop_Price"], line_dash="dash", line_color="#b91c1c", line_width=1.8, annotation_text=f"STOP-LOSS (EXIT): ${d['Stop_Price']:,.2f} ({d['Stop_Pct']:.1f}%)", annotation_position="bottom right", row=1, col=1)
-      vol_colors = ['#15803d' if c >= o else '#b91c1c' for c, o in zip(df_hist['Close'], df_hist['Open'])]
-      fig.add_trace(go.Bar(x=df_hist.index, y=df_hist['Volume'], marker_color=vol_colors, name="Volume"), row=2, col=1)
-      fig.add_trace(go.Scatter(x=df_hist.index, y=df_hist['MACD'], line=dict(color="#2563eb", width=1.2), name="MACD"), row=3, col=1)
-      fig.add_trace(go.Scatter(x=df_hist.index, y=df_hist['MACD_Signal'], line=dict(color="#ea580c", width=1.2), name="Signal"), row=3, col=1)
-      fig.add_trace(go.Bar(x=df_hist.index, y=df_hist['MACD_Hist'], marker_color="#cbd5e1", name="Histogram"), row=3, col=1)
-      default_x_start = max(pd.to_datetime(df_hist.index[0]), last_dt - pd.Timedelta(days=340))
-      default_x_end = box_end_dt + pd.Timedelta(days=10) if show_rr_box else last_dt + pd.Timedelta(days=10)
-      fig.update_xaxes(
-        range=[default_x_start, default_x_end],
-        rangeselector=dict(
-          buttons=list([
-            dict(count=3, label="3M", step="month", stepmode="backward"),
-            dict(count=6, label="6M", step="month", stepmode="backward"),
-            dict(count=1, label="YTD", step="year", stepmode="todate"),
-            dict(count=1, label="1Y", step="year", stepmode="backward"),
-            dict(count=2, label="2Y", step="year", stepmode="backward"),
-            dict(count=3, label="3Y", step="year", stepmode="backward"),
-            dict(count=5, label="5Y", step="year", stepmode="backward"),
-            dict(step="all", label="MAX")
-          ]),
-          bgcolor="#f4efe6",
-          activecolor="#c5a059",
-          font=dict(size=11)
-        ),
-        row=1, col=1
+        fig.add_hline(y=d["Target_Price"], line_dash="dash", line_color="#089981", line_width=1.6, annotation_text=f"TARGET: ${d['Target_Price']:,.2f}", annotation_position="top left", row=1, col=1)
+        fig.add_hline(y=d["BOS_Level"], line_dash="dot", line_color="#2563eb", line_width=1.5, annotation_text=f"TRIGGER: ${d['BOS_Level']:,.2f}", annotation_position="bottom left", row=1, col=1)
+        fig.add_hline(y=d["Stop_Price"], line_dash="dash", line_color="#f23645", line_width=1.6, annotation_text=f"STOP: ${d['Stop_Price']:,.2f}", annotation_position="bottom right", row=1, col=1)
+
+      vol_colors = ['#089981' if c >= o else '#f23645' for c, o in zip(df_view['Close'], df_view['Open'])]
+      fig.add_trace(go.Bar(x=df_view.index, y=df_view['Volume'], marker_color=vol_colors, name="Volume"), row=2, col=1)
+      fig.add_trace(go.Scatter(x=df_view.index, y=df_view['MACD'], line=dict(color="#2563eb", width=1.2), name="MACD"), row=3, col=1)
+      fig.add_trace(go.Scatter(x=df_view.index, y=df_view['MACD_Signal'], line=dict(color="#ea580c", width=1.2), name="Signal"), row=3, col=1)
+      fig.add_trace(go.Bar(x=df_view.index, y=df_view['MACD_Hist'], marker_color="#cbd5e1", name="Histogram"), row=3, col=1)
+
+      vis_low = float(df_view["Low"].min())
+      vis_high = float(df_view["High"].max())
+      if show_rr_box:
+        vis_low = min(vis_low, stp_px)
+        vis_high = max(vis_high, tgt_px)
+      y_span = max(vis_high - vis_low, vis_high * 0.05)
+      y_min_pad = max(0.0, vis_low - y_span * 0.06)
+      y_max_pad = vis_high + y_span * 0.08
+
+      x_right_limit = box_end_dt + pd.Timedelta(days=int(box_span_days * 0.55)) if show_rr_box else last_dt + pd.Timedelta(days=step_days * 6)
+      fig.update_xaxes(range=[first_dt, x_right_limit], row=1, col=1)
+      fig.update_xaxes(range=[first_dt, x_right_limit], row=2, col=1)
+      fig.update_xaxes(range=[first_dt, x_right_limit], row=3, col=1)
+      fig.update_yaxes(range=[y_min_pad, y_max_pad], side="right", row=1, col=1)
+      fig.update_yaxes(side="right", row=2, col=1)
+      fig.update_yaxes(side="right", row=3, col=1)
+      fig.update_layout(
+        height=700,
+        margin=dict(l=10, r=40, t=38, b=10),
+        paper_bgcolor="white",
+        plot_bgcolor="white",
+        xaxis_rangeslider_visible=False,
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0, font=dict(size=11))
       )
-      fig.update_layout(height=680, margin=dict(l=0, r=20, t=30, b=0), paper_bgcolor="white", plot_bgcolor="white", xaxis_rangeslider_visible=False)
       st.plotly_chart(fig, use_container_width=True)
     st.markdown("### Verified Recent Headlines (Last 72 Hours)")
     sym_news = _fetch_rss_raw(f'"{sym}" stock when:3d', max_per_query=8, ticker_tag=sym, max_age_hours=settings["max_news_age_hours"])
