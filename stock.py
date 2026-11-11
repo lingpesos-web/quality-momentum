@@ -14,6 +14,10 @@ import urllib.request
 import urllib.parse
 import xml.etree.ElementTree as ET
 import email.utils
+import imaplib
+import smtplib
+from email.header import decode_header
+from email.message import EmailMessage
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 from concurrent.futures import ThreadPoolExecutor
@@ -1530,6 +1534,158 @@ def get_gemini_api_key():
     pass
   return os.environ.get("GEMINI_API_KEY", "").strip() or str(settings.get("gemini_api_key", "")).strip()
 
+
+def fetch_gmail_newsletters_imap(max_chars=4500):
+  gmail_user = ""
+  gmail_pass = ""
+  try:
+    if "GMAIL_USER" in st.secrets:
+      gmail_user = str(st.secrets["GMAIL_USER"]).strip()
+    if "GMAIL_APP_PASSWORD" in st.secrets:
+      gmail_pass = str(st.secrets["GMAIL_APP_PASSWORD"]).strip()
+  except Exception:
+    pass
+  if not gmail_user:
+    gmail_user = str(settings.get("gmail_user", "ling.angels@gmail.com")).strip()
+  if not gmail_pass:
+    gmail_pass = str(settings.get("gmail_app_password", "")).strip()
+  if not gmail_user or not gmail_pass:
+    return None, "Gmail App Password not set (using live RSS & ARK/Stocktwits web fallback)."
+
+  out_blocks = []
+  try:
+    mail = imaplib.IMAP4_SSL("imap.gmail.com", 993)
+    mail.login(gmail_user, gmail_pass)
+    mail.select("inbox")
+    for label, sender_q in [
+      ("STOCKTWITS DAILY RIP", 'FROM "thedailyrip.stocktwits.com"'),
+      ("ARK TRADING DESK", 'FROM "arkfunds.com"')
+    ]:
+      typ, data = mail.search(None, f'({sender_q})')
+      if typ != "OK" or not data or not data[0]:
+        typ, data = mail.search(None, f'(TEXT "{label.split()[0]}")')
+      if typ == "OK" and data and data[0]:
+        msg_ids = data[0].split()
+        latest_id = msg_ids[-1]
+        typ_f, msg_data = mail.fetch(latest_id, "(RFC822)")
+        if typ_f == "OK" and msg_data and msg_data[0]:
+          raw_email = msg_data[0][1]
+          msg_obj = email.message_from_bytes(raw_email)
+          subj_raw = msg_obj.get("Subject", "")
+          subj_parts = decode_header(subj_raw)
+          subj_str = "".join([
+            (p.decode(enc or "utf-8", errors="ignore") if isinstance(p, bytes) else str(p))
+            for p, enc in subj_parts
+          ])
+          body_txt = ""
+          if msg_obj.is_multipart():
+            for part in msg_obj.walk():
+              ctype = part.get_content_type()
+              if ctype == "text/plain":
+                payload_b = part.get_payload(decode=True)
+                if payload_b:
+                  body_txt += payload_b.decode("utf-8", errors="ignore")
+          else:
+            payload_b = msg_obj.get_payload(decode=True)
+            if payload_b:
+              body_txt = payload_b.decode("utf-8", errors="ignore")
+          clean_body = " ".join(body_txt.split())[:max_chars]
+          out_blocks.append(f"[{label} — Subject: {subj_str}]\n{clean_body}")
+    mail.logout()
+    if out_blocks:
+      return "\n\n".join(out_blocks), f"Loaded {len(out_blocks)} newsletter(s) from {gmail_user}"
+    return None, f"Connected to {gmail_user}, no recent Stocktwits/ARK emails found."
+  except Exception as e:
+    return None, f"IMAP note: {str(e)[:80]}"
+
+def send_strategist_email_report(subject_str, markdown_body):
+  gmail_user = ""
+  gmail_pass = ""
+  try:
+    if "GMAIL_USER" in st.secrets:
+      gmail_user = str(st.secrets["GMAIL_USER"]).strip()
+    if "GMAIL_APP_PASSWORD" in st.secrets:
+      gmail_pass = str(st.secrets["GMAIL_APP_PASSWORD"]).strip()
+  except Exception:
+    pass
+  if not gmail_user:
+    gmail_user = str(settings.get("gmail_user", "ling.angels@gmail.com")).strip()
+  if not gmail_pass:
+    gmail_pass = str(settings.get("gmail_app_password", "")).strip()
+  recipient = str(settings.get("report_email_to", gmail_user or "ling.angels@gmail.com")).strip()
+  if not gmail_user or not gmail_pass:
+    return False, "Add GMAIL_APP_PASSWORD in Settings or Streamlit Secrets to enable direct Gmail SMTP delivery."
+  try:
+    msg = EmailMessage()
+    msg["Subject"] = subject_str
+    msg["From"] = gmail_user
+    msg["To"] = recipient
+    msg.set_content(markdown_body)
+    with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=12) as server:
+      server.login(gmail_user, gmail_pass)
+      server.send_message(msg)
+    return True, f"Emailed report to {recipient}"
+  except Exception as e:
+    return False, f"SMTP error: {str(e)[:80]}"
+
+def build_second_order_strategist_prompt(report_mode="0615_MAIN", custom_newsletters_text=""):
+  all_tks = get_all_monitored_tickers()
+  extra_comp_etfs = ["NVDA", "AMD", "MU", "INTC", "EWJ", "EWY", "VRT", "COHR", "LITE", "PLTR", "CRDO", "AVGO", "TSM"]
+  combined_tks = list(dict.fromkeys(all_tks + extra_comp_etfs))[:42]
+  snap = fetch_batch_market_data(combined_tks, account_size=settings["account_size"])
+  t_lines = []
+  for sym_k in combined_tks:
+    if sym_k not in snap:
+      continue
+    r = snap[sym_k]
+    t_lines.append(
+      f"{sym_k}: Close=${r['Price']:.2f} ({r['Change_Pct']:+.2f}%), High=${r['Day_High']:.2f}, Low=${r['Day_Low']:.2f}, "
+      f"Playbook={r['TCT_Model']}, Action={r['TCT_Action']}, Trigger=${r['BOS_Level']:.2f}, "
+      f"Target=${r['Target_Price']:.2f}, Stop=${r['Stop_Price']:.2f}, Pot_RR={r.get('Potential_RR', r['R_Multiple']):.2f}R, "
+      f"EMA20=${r['EMA20_Val']:.2f}, EMA50=${r['EMA50_Val']:.2f}, SMA150=${r['SMA150_Val']:.2f}, "
+      f"RSI14={r['RSI']:.1f}, Paced_RVOL={r['Paced_RVOL']:.2f}x, RS_vs_SPY={r['RS_Diff']:+.1f}%"
+    )
+  vids = fetch_sds_latest_videos()
+  vid_lines = [f"- [{v['date']}] {v['title']} ({v['link']})" for v in vids[:5]]
+  wl_news = fetch_watchlist_news_pool(all_tks[:18], max_items=18, max_age_hours=48)
+  mkt_news = fetch_google_news_rss("US stock market AI semiconductors Federal Reserve", max_items=12, max_age_hours=48)
+  mcf_news = fetch_metals_crypto_fx_news(max_items=10, max_age_hours=48)
+  news_lines = [f"- [{a.get('ticker', 'MKT')} | {a['age']}] {a['title']} ({a['publisher']})" for a in (wl_news[:12] + mkt_news[:8] + mcf_news[:6])]
+
+  imap_text, imap_status = fetch_gmail_newsletters_imap()
+  nl_block = custom_newsletters_text.strip() or imap_text or "No direct IMAP newsletter body loaded; use the latest market/ARK/Stocktwits catalysts from headlines."
+
+  if report_mode == "0915_SUPPLEMENT":
+    task_instructions = (
+      "請用繁體中文（廣東話財經分析風格）撰寫【09:15 AM HKT 晨間電郵補充包：Stocktwits 深度內幕 ＋ ARK 持倉變動交叉驗證】。\n"
+      "結構要求：\n"
+      "1. **Stocktwits《The Daily Rip》核心內幕與二階思維推演**：提取最關鍵嘅突發新聞、盤後業績（例如 AI 算力、晶片調查、大型 IPO 或宏觀利率轉向），唔好只講表面升跌，推演邊隻競爭對手或上下游股票會受惠或受害。\n"
+      "2. **ARK Trading Desk 買賣清單交叉對比**：分析 Cathie Wood 最新買入同沽出嘅股票，對比我哋 Dashboard 嘅真實陰陽燭圖表（20-EMA、150-MA、RVOL、Playbook 訊號），判斷邊隻跟得過、邊隻圖表仲係弱勢唔好接飛刀。\n"
+      "3. **今日美股開市前 Top 3 實戰行動清單**：給出明確嘅 Buy Trigger、Stop-Loss、Target 同埋潛在 R/R。"
+    )
+  else:
+    task_instructions = (
+      "請用繁體中文（廣東話專業投資策略師風格）撰寫【06:15 AM HKT 收市後首席策略師深度日報（二階思維 ＋ 圖表驗證）】。\n"
+      "你必須展現獨立判斷能力與二階思維（Second-Order Thinking），嚴格按照以下四個部分輸出：\n"
+      "1. **宏觀大局與亞洲/歐美資金流推演（結合掃地僧最新觀點 ＋ ETF 策略）**：\n"
+      "   - 結合掃地僧最新宏觀邏輯與當日美股收市表現，檢視亞洲 ETF（`EWJ` 日本 vs `EWY` 南韓）及美元/金銀/Crypto 走勢，給出具體造淡或對沖嘅圖表阻力位、止蝕位與目標價。\n"
+      "2. **焦點新聞二階推演：龍頭震盪 vs. 競爭對手邊隻真受惠？（例如 NVDA vs AMD / MU / INTC）**：\n"
+      "   - 針對當日最爆嘅科技或半導體新聞，分析資金係咪出現輪動？逐一核對競爭對手（如 `AMD`、`MU`、`INTC`、`AVGO`）嘅真實陰陽燭數據（收市價、20-EMA、150-MA、成交量 RVOL），分清邊隻係「真金白銀流入嘅真受惠股（附買入價/止蝕/目標 R/R）」，邊隻係「基本面與圖表雙輸嘅價值陷阱」。\n"
+      "3. **政策／基建／AI 二階推演（例如數據中心電網審批、AI 債務週期對 `VRT` / `COHR` / `LITE` / `PLTR` 嘅影響）**：\n"
+      "   - 推演政策或行業瓶頸下嘅逆向贏家，並用 Dashboard 技術指標驗證。\n"
+      "4. **Watchlist 與持倉精選 Action Plan**：\n"
+      "   - 挑選出今日圖表結構最靚（例如 Stage 2 Higher Low、TCT Bottom Box 或 20-EMA Pullback）嘅 Top 3 股票，列出準確 Buy Trigger、Stop-Loss、Take Profit 同 Potential R/R。"
+    )
+
+  full_prompt = (
+    f"{task_instructions}\n\n"
+    f"=== 掃地僧 (@sds.getrich) 最新宏觀影片主題 ===\n" + "\n".join(vid_lines) + "\n\n"
+    f"=== 最新 48 小時 Watchlist、大市、金屬及 Crypto 新聞 ===\n" + "\n".join(news_lines) + "\n\n"
+    f"=== Stocktwits & ARK 電郵 / 通訊內容 ({imap_status}) ===\n{nl_block}\n\n"
+    f"=== 實時陰陽燭圖表與 8 大 Playbook 數據 ===\n" + "\n".join(t_lines)
+  )
+  return full_prompt
+
 def query_gemini_copilot(user_prompt, chat_history, portfolio_context, model_pref="auto", thinking_level="HIGH"):
   api_key = get_gemini_api_key()
   if not api_key:
@@ -1688,9 +1844,32 @@ def render_ai_copilot_tab():
       st.write(
         "23-hour US trading removes the Asian time-zone barrier, draining retail liquidity from Asian exchanges and shifting pricing power to US hours. As Asian investors use USD stablecoins (USDT/USDC) to buy US stocks, reserve laws force 1:1 US Treasury bill purchases—absorbing US debt while fueling US equity leaders."
       )
+    st.markdown("#### Option 2: Daily Chief Strategist Report (06:15 AM & 09:15 AM HKT)")
+    st.caption("Generates the Second-Order Thinking + Chart Confirmation report using live candles, @sds.getrich macro, and Stocktwits/ARK emails.")
+    sr1, sr2 = st.columns(2)
+    prompt_to_send = None
+    if sr1.button("Run 06:15 AM Main Report", type="primary", use_container_width=True):
+      prompt_to_send = build_second_order_strategist_prompt(report_mode="0615_MAIN")
+    if sr2.button("Run 09:15 AM ARK/Rip Supplement", type="primary", use_container_width=True):
+      prompt_to_send = build_second_order_strategist_prompt(report_mode="0915_SUPPLEMENT")
+
+    with st.expander("Gemini Scheduled Action Setup (Wake Up at 9:00 AM with 100% Quota)", expanded=False):
+      st.markdown(
+        "**Why Option 2 Protects Your 5-Hour Gemini Quota:**\n"
+        "- **Stage 1 (`06:15 AM HKT` — 1 hr after NYSE Close):** Runs the heavy Second-Order Thinking + Chart Confirmation report while you sleep. By the time you wake up at 9:00 AM, your 5-hour Gemini quota is already mostly replenished (and 100% full by 11:15 AM).\n"
+        "- **Stage 2 (`09:15 AM HKT` — After Stocktwits 08:02 AM & ARK 09:15 AM emails arrive):** Reads `newsletter@thedailyrip.stocktwits.com` and `tradingdesk@arkfunds.com` in your `ling.angels@gmail.com` inbox and cross-checks ARK's buys/sells against your chart levels."
+      )
+      st.code(
+        "Every Tuesday to Saturday at 06:15 AM HKT, generate my Daily Chief Strategist Report in Cantonese/Traditional Chinese using Second-Order Thinking and Chart Confirmation: "
+        "(1) Synthesize @sds.getrich latest macro thesis and compare EWJ vs EWY chart levels for short/hedge setups; "
+        "(2) Analyze top US tech/AI news and cross-check competitors (NVDA vs AMD, MU, INTC, AVGO) using daily candle closes, 20-EMA, 150-SMA, and RVOL to separate true beneficiaries from value traps; "
+        "(3) Analyze policy/infrastructure second-order winners (VRT, COHR, LITE, PLTR); "
+        "(4) Check my Gmail (from:thedailyrip.stocktwits.com OR from:arkfunds.com) and give exact Buy Trigger, Stop-Loss, Target, and Potential R/R.",
+        language="text"
+      )
+
     st.markdown("**Quick Macro & Portfolio Prompts:**")
     qp1, qp2 = st.columns(2)
-    prompt_to_send = None
     if qp1.button("Review My Open Positions", use_container_width=True):
       prompt_to_send = "Review my current active positions, unrealized P&L, and stop-losses. Which positions need stop adjustments or partial profit-taking right now?"
     if qp2.button("Macro & Bull 2/3 Strategy", use_container_width=True):
@@ -1771,7 +1950,27 @@ def render_ai_copilot_tab():
       st.session_state.chat_messages.append({"role": "assistant", "content": reply})
       st.rerun()
     if st.session_state.chat_messages:
-      if st.button("Clear Chat History", key="clr_chat_btn"):
+      act_c1, act_c2, act_c3 = st.columns(3)
+      if act_c1.button("Send Last Report to ntfy/TG", use_container_width=True, key="push_last_rep"):
+        last_assist = [m["content"] for m in st.session_state.chat_messages if m["role"] == "assistant"]
+        if last_assist:
+          ok_p, msg_p = send_ntfy_alert(last_assist[-1][:3800], "AI Chief Strategist Report")
+          if ok_p:
+            st.success(f"Pushed: {msg_p}")
+          else:
+            st.error(msg_p)
+      if act_c2.button("Email Last Report (Gmail)", use_container_width=True, key="email_last_rep"):
+        last_assist = [m["content"] for m in st.session_state.chat_messages if m["role"] == "assistant"]
+        if last_assist:
+          ok_e, msg_e = send_strategist_email_report(
+            f"AI Chief Strategist Report ({datetime.now().strftime('%Y-%m-%d %H:%M')})",
+            last_assist[-1]
+          )
+          if ok_e:
+            st.success(msg_e)
+          else:
+            st.warning(msg_e)
+      if act_c3.button("Clear Chat History", use_container_width=True, key="clr_chat_btn"):
         st.session_state.chat_messages = []
         st.rerun()
 MACRO_SYMBOLS = {
