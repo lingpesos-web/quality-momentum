@@ -47,6 +47,7 @@
     "BuyDate": "2026-11-06",
     "StopLoss": 144.0,
     "Target15": 184.0,
-    "HalfSold": false
+    "HalfSold": false,
+    "Remarks": "Jensen huang Day."
   }
 ]
