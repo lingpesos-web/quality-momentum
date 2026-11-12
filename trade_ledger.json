@@ -24,5 +24,18 @@
     "Gain_Loss_Pct": 7.62,
     "StopLoss": 144.0,
     "Remarks": "Jensen huang Day. | Closed full position"
+  },
+  {
+    "Date": "2026-11-12",
+    "Timestamp": "2026-11-12 17:39",
+    "Action": "CLOSE",
+    "Ticker": "VRT",
+    "Shares": 150,
+    "BuyPrice": 258.12,
+    "SellPrice": 211.1,
+    "Gain_Loss_USD": -7053.0,
+    "Gain_Loss_Pct": -18.22,
+    "StopLoss": 232.308,
+    "Remarks": "JW Day | Closed full position"
   }
 ]
