@@ -1,0 +1,15 @@
+[
+  {
+    "Date": "2026-11-12",
+    "Timestamp": "2026-11-12 16:58",
+    "Action": "CLOSE",
+    "Ticker": "SOXL",
+    "Shares": 100,
+    "BuyPrice": 45.0,
+    "SellPrice": 66.85,
+    "Gain_Loss_USD": 2185.0,
+    "Gain_Loss_Pct": 48.56,
+    "StopLoss": 57.73,
+    "Remarks": "Nodal down 13% day, Jensen huang resigned. | Closed full position"
+  }
+]
