@@ -37,6 +37,7 @@
     "BuyDate": "2026-08-28",
     "StopLoss": 232.30800000000002,
     "Target15": 296.83799999999997,
-    "HalfSold": false
+    "HalfSold": false,
+    "Remarks": "JW Day"
   }
 ]
