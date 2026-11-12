@@ -11,5 +11,18 @@
     "Gain_Loss_Pct": 48.56,
     "StopLoss": 57.73,
     "Remarks": "Nodal down 13% day, Jensen huang resigned. | Closed full position"
+  },
+  {
+    "Date": "2026-11-12",
+    "Timestamp": "2026-11-12 17:37",
+    "Action": "CLOSE",
+    "Ticker": "PLTR",
+    "Shares": 200,
+    "BuyPrice": 160.0,
+    "SellPrice": 172.2,
+    "Gain_Loss_USD": 2440.0,
+    "Gain_Loss_Pct": 7.62,
+    "StopLoss": 144.0,
+    "Remarks": "Jensen huang Day. | Closed full position"
   }
 ]
