@@ -1,0 +1,18 @@
+{
+  "w_fund": 40,
+  "w_tech": 40,
+  "w_mom": 20,
+  "account_size": 100000,
+  "news_limit": 60,
+  "max_news_age_hours": 72,
+  "alert_breakout": true,
+  "alert_support": true,
+  "notif_channel": "ntfy Push",
+  "ntfy_topic": "2026_USstockspicks",
+  "tg_bot_token": "",
+  "tg_chat_id": "",
+  "gmail_user": "ling.angels@gmail.com",
+  "gmail_app_password": "wnsn wtzg tcfx nurf",
+  "report_email_to": "ling.angels@gmail.com",
+  "auto_email_report": true
+}
