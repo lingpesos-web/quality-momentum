@@ -65,5 +65,21 @@
     "XLP",
     "VGK"
   ],
-  "Active Positions": []
+  "Active Positions": [],
+  "Options Radar": [
+    "VRTX",
+    "MSFT",
+    "NVDA",
+    "APP",
+    "AXP",
+    "ABBV",
+    "AMD",
+    "MU",
+    "PLTR",
+    "AVGO",
+    "COHR",
+    "VRT",
+    "HOOD",
+    "ADPT"
+  ]
 }
