@@ -8,6 +8,7 @@ from plotly.subplots import make_subplots
 import json
 import os
 import io
+import math
 import time
 import base64
 import urllib.request
@@ -51,6 +52,9 @@ STATE_FILE = f"alert_state{USER_SUFFIX}.json"
 DATA_FILE = f"watchlists{USER_SUFFIX}.json"
 POSITIONS_FILE = f"positions{USER_SUFFIX}.json"
 LEDGER_FILE = f"trade_ledger{USER_SUFFIX}.json"
+OPTIONS_RADAR_FILE = f"options_radar{USER_SUFFIX}.json"
+OPTIONS_POSITIONS_FILE = f"options_positions{USER_SUFFIX}.json"
+OPTIONS_LEDGER_FILE = f"options_ledger{USER_SUFFIX}.json"
 SETTINGS_FILE = f"settings{USER_SUFFIX}.json"
 UI_STATE_FILE = f"ui_state{USER_SUFFIX}.json"
 def get_target_repo():
@@ -224,6 +228,7 @@ DEFAULT_WATCHLISTS = {
     "AMD", "APP", "COIN", "MSTR", "CRDO", "NVDA"
   ],
   "Opportunity Radar": ["PLTR", "MU", "HOOD", "LRCX", "SOFI", "MRVL", "AVGO", "COST"],
+  "Options Radar": ["MSFT", "NVDA", "APP", "AXP", "ABBV", "AMD", "MU", "PLTR", "AVGO", "COHR", "VRT", "HOOD", "ADPT"],
   "Special Case Stocks": ["COIN", "MSTR", "SOXL", "IONQ"],
   "Active Positions": []
 }
@@ -273,6 +278,12 @@ positions = load_json(POSITIONS_FILE, [])
 trade_ledger = load_json(LEDGER_FILE, [])
 if not isinstance(trade_ledger, list):
   trade_ledger = []
+options_positions = load_json(OPTIONS_POSITIONS_FILE, [])
+if not isinstance(options_positions, list):
+  options_positions = []
+options_ledger = load_json(OPTIONS_LEDGER_FILE, [])
+if not isinstance(options_ledger, list):
+  options_ledger = []
 
 def get_all_monitored_tickers():
   combined = []
@@ -1490,6 +1501,956 @@ def render_active_positions_manager(key_prefix="ap"):
   else:
     st.caption("No ledger entries found in the selected date range.")
 
+
+# --- OPTIONS CHAIN, BLACK-SCHOLES GREEKS & DUAL-ENGINE SCANNER (LEAPS + SHORT-TERM BETS) ---
+def _norm_cdf(x):
+  return 0.5 * (1.0 + math.erf(x / math.sqrt(2.0)))
+
+def _bs_price_and_delta(S, K, T_years, r=0.045, sigma=0.40, opt_type="CALL"):
+  S = max(float(S), 0.01)
+  K = max(float(K), 0.01)
+  T = max(float(T_years), 1.0 / 365.0)
+  iv = float(sigma) if (sigma and not np.isnan(sigma) and float(sigma) > 0.05) else 0.40
+  iv = min(max(iv, 0.08), 3.00)
+  sqrt_T = math.sqrt(T)
+  d1 = (math.log(S / K) + (r + 0.5 * iv * iv) * T) / (iv * sqrt_T)
+  d2 = d1 - iv * sqrt_T
+  if str(opt_type).upper().startswith("P"):
+    delta = _norm_cdf(d1) - 1.0
+    theo = K * math.exp(-r * T) * _norm_cdf(-d2) - S * _norm_cdf(-d1)
+    intrinsic = max(K - S, 0.0)
+  else:
+    delta = _norm_cdf(d1)
+    theo = S * _norm_cdf(d1) - K * math.exp(-r * T) * _norm_cdf(d2)
+    intrinsic = max(S - K, 0.0)
+  return max(theo, intrinsic, 0.01), float(delta)
+
+def _extract_contract_mid_iv(row, S, K, T_years, opt_type="CALL"):
+  bid = float(row.get("bid", 0.0) or 0.0)
+  ask = float(row.get("ask", 0.0) or 0.0)
+  last_p = float(row.get("lastPrice", 0.0) or 0.0)
+  raw_iv = float(row.get("impliedVolatility", 0.0) or 0.0)
+  iv = raw_iv if (0.05 <= raw_iv <= 3.5) else 0.42
+  theo_now, delta_now = _bs_price_and_delta(S, K, T_years, r=0.045, sigma=iv, opt_type=opt_type)
+  if bid > 0 and ask > 0:
+    mid = 0.5 * (bid + ask)
+  elif last_p > 0:
+    mid = last_p
+  else:
+    mid = theo_now
+  intrinsic = max(S - K, 0.0) if str(opt_type).upper().startswith("C") else max(K - S, 0.0)
+  mid = max(mid, intrinsic, 0.05)
+  extrinsic = max(mid - intrinsic, 0.0)
+  vol = int(row.get("volume", 0) or 0) if not np.isnan(row.get("volume", 0) or 0) else 0
+  oi = int(row.get("openInterest", 0) or 0) if not np.isnan(row.get("openInterest", 0) or 0) else 0
+  return {
+    "Bid": round(bid, 2),
+    "Ask": round(ask, 2),
+    "Last": round(last_p, 2),
+    "Mid": round(mid, 2),
+    "IV_Pct": round(iv * 100.0, 1),
+    "IV_Raw": iv,
+    "Delta": round(delta_now, 3),
+    "Intrinsic": round(intrinsic, 2),
+    "Extrinsic": round(extrinsic, 2),
+    "Extrinsic_Pct": round((extrinsic / S) * 100.0, 2) if S > 0 else 0.0,
+    "Volume": vol,
+    "OpenInterest": oi
+  }
+
+@st.cache_data(ttl=300, show_spinner=False)
+def fetch_ticker_options_recommendations_cached(
+  sym, stock_price, prev_close, bos_level, target_price, stop_price,
+  ema20, ema50, sma150, playbook_name, tct_action, tct_prio, below_sma150
+):
+  out = {
+    "Symbol": sym,
+    "Stock_Price": stock_price,
+    "LEAPS_Call": None,
+    "Short_Call": None,
+    "Short_Put": None,
+    "Implied_Move_Pct": None,
+    "Expirations": [],
+    "Status": "OK"
+  }
+  try:
+    tk = yf.Ticker(sym)
+    exp_list = list(tk.options or [])
+    if not exp_list:
+      out["Status"] = "No listed options chain found for this symbol."
+      return out
+    out["Expirations"] = exp_list
+    now_dt = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+    exp_with_dte = []
+    for e_str in exp_list:
+      try:
+        dt_e = datetime.strptime(e_str, "%Y-%m-%d")
+        dte = (dt_e - now_dt).days
+        if dte >= 3:
+          exp_with_dte.append((dte, e_str))
+      except Exception:
+        continue
+    if not exp_with_dte:
+      out["Status"] = "No active future expirations available."
+      return out
+
+    # --- 1. SELECT LEAPS EXPIRATION (>= 240 DTE preferred, else furthest available >= 150 DTE) ---
+    leaps_exps = [x for x in exp_with_dte if 250 <= x[0] <= 600]
+    if not leaps_exps:
+      leaps_exps = [x for x in exp_with_dte if x[0] >= 160]
+    if not leaps_exps:
+      leaps_exps = [exp_with_dte[-1]]
+    leaps_dte, leaps_exp_str = sorted(leaps_exps, key=lambda x: abs(x[0] - 330))[0]
+
+    try:
+      ch_leaps = tk.option_chain(leaps_exp_str)
+      calls_df = ch_leaps.calls.copy() if ch_leaps and ch_leaps.calls is not None else pd.DataFrame()
+      if not calls_df.empty:
+        T_leaps = max(leaps_dte / 365.0, 0.1)
+        best_leaps = None
+        best_leaps_score = -1e9
+        for _, r_c in calls_df.iterrows():
+          K = float(r_c.get("strike", 0.0) or 0.0)
+          if K <= stock_price * 0.35 or K >= stock_price * 0.96:
+            continue
+          m_info = _extract_contract_mid_iv(r_c, stock_price, K, T_leaps, "CALL")
+          d_val = m_info["Delta"]
+          if not (0.76 <= d_val <= 0.94):
+            continue
+          mid_px = m_info["Mid"]
+          # Project option value at Stock Target & Stock Stop (assuming 45 days elapsed)
+          T_rem = max((leaps_dte - 30) / 365.0, 0.15)
+          opt_at_tgt, _ = _bs_price_and_delta(target_price, K, T_rem, r=0.045, sigma=m_info["IV_Raw"], opt_type="CALL")
+          opt_at_stp, _ = _bs_price_and_delta(stop_price, K, max((leaps_dte - 10) / 365.0, 0.15), r=0.045, sigma=m_info["IV_Raw"], opt_type="CALL")
+          opt_reward = max(opt_at_tgt - mid_px, 0.01)
+          opt_risk = max(mid_px - opt_at_stp, mid_px * 0.08, 0.05)
+          opt_rr = round(opt_reward / opt_risk, 2)
+          lev_ratio = round((stock_price * d_val) / max(mid_px, 0.1), 2)
+          # Score closeness to 0.875 Delta (85-90% Delta sweet spot) + low extrinsic %
+          score_l = -abs(d_val - 0.875) * 100.0 - m_info["Extrinsic_Pct"] * 1.8 + min(opt_rr, 6.0) * 2.0
+          if score_l > best_leaps_score:
+            best_leaps_score = score_l
+            if not below_sma150 and tct_prio <= 2 and m_info["Extrinsic_Pct"] <= 8.0:
+              v_badge, v_text = "badge-tct-buy", "🟢 STRONG LEAPS BUY (Stage 2 + 85-90Δ)"
+            elif below_sma150:
+              v_badge, v_text = "badge-tct-sell", "🔴 AVOID LEAPS (Stock Below 150-MA)"
+            else:
+              v_badge, v_text = "badge-tct-watch", "🟡 WATCH FOR PULLBACK ENTRY"
+            best_leaps = {
+              "Symbol": sym,
+              "Type": "CALL",
+              "Bucket": "LEAPS Call (0.85–0.90 Δ)",
+              "Expiration": leaps_exp_str,
+              "DTE": leaps_dte,
+              "Strike": round(K, 2),
+              "Delta": d_val,
+              "Mid": mid_px,
+              "Bid": m_info["Bid"],
+              "Ask": m_info["Ask"],
+              "Contract_Cost": round(mid_px * 100.0, 0),
+              "Intrinsic": m_info["Intrinsic"],
+              "Extrinsic": m_info["Extrinsic"],
+              "Extrinsic_Pct": m_info["Extrinsic_Pct"],
+              "IV_Pct": m_info["IV_Pct"],
+              "Leverage": lev_ratio,
+              "BreakEven": round(K + mid_px, 2),
+              "BreakEven_Pct": round(((K + mid_px - stock_price) / stock_price) * 100.0, 2),
+              "Opt_Target_Px": round(opt_at_tgt, 2),
+              "Opt_Target_Pct": round(((opt_at_tgt - mid_px) / mid_px) * 100.0, 1),
+              "Opt_Stop_Px": round(opt_at_stp, 2),
+              "Opt_Stop_Pct": round(((opt_at_stp - mid_px) / mid_px) * 100.0, 1),
+              "Opt_RR": opt_rr,
+              "Verdict_Badge": v_badge,
+              "Verdict_Text": v_text
+            }
+        out["LEAPS_Call"] = best_leaps
+    except Exception:
+      pass
+
+    # --- 2. SELECT SHORT-TERM TACTICAL EXPIRATION (10 to 38 DTE preferred, else closest 5 to 60 DTE) ---
+    short_exps = [x for x in exp_with_dte if 10 <= x[0] <= 38]
+    if not short_exps:
+      short_exps = [x for x in exp_with_dte if 5 <= x[0] <= 60]
+    if not short_exps:
+      short_exps = [exp_with_dte[0]]
+    short_dte, short_exp_str = sorted(short_exps, key=lambda x: abs(x[0] - 21))[0]
+
+    try:
+      ch_short = tk.option_chain(short_exp_str)
+      s_calls = ch_short.calls.copy() if ch_short and ch_short.calls is not None else pd.DataFrame()
+      s_puts = ch_short.puts.copy() if ch_short and ch_short.puts is not None else pd.DataFrame()
+      T_short = max(short_dte / 365.0, 2.0 / 365.0)
+
+      # Calculate ATM Implied Move %
+      if not s_calls.empty and not s_puts.empty:
+        try:
+          atm_c_row = s_calls.iloc[(s_calls["strike"] - stock_price).abs().argsort()[:1]].iloc[0]
+          atm_p_row = s_puts.iloc[(s_puts["strike"] - stock_price).abs().argsort()[:1]].iloc[0]
+          c_m = _extract_contract_mid_iv(atm_c_row, stock_price, float(atm_c_row["strike"]), T_short, "CALL")["Mid"]
+          p_m = _extract_contract_mid_iv(atm_p_row, stock_price, float(atm_p_row["strike"]), T_short, "PUT")["Mid"]
+          out["Implied_Move_Pct"] = round(((c_m + p_m) / stock_price) * 100.0, 1)
+        except Exception:
+          pass
+
+      # Short-Term Tactical CALL (0.42 to 0.65 Delta — Dip-Buy / Premium Flush / Breakout)
+      if not s_calls.empty:
+        best_sc = None
+        best_sc_score = -1e9
+        for _, r_c in s_calls.iterrows():
+          K = float(r_c.get("strike", 0.0) or 0.0)
+          if K <= stock_price * 0.85 or K >= stock_price * 1.15:
+            continue
+          m_info = _extract_contract_mid_iv(r_c, stock_price, K, T_short, "CALL")
+          d_val = m_info["Delta"]
+          if not (0.35 <= d_val <= 0.68):
+            continue
+          mid_px = m_info["Mid"]
+          # Estimate yesterday's call price to detect sudden drop in call premium ("Premium Flush")
+          prev_theo, _ = _bs_price_and_delta(prev_close, K, (short_dte + 1) / 365.0, r=0.045, sigma=m_info["IV_Raw"], opt_type="CALL")
+          prem_chg_pct = ((mid_px - prev_theo) / max(prev_theo, 0.05)) * 100.0
+          # Project option value at Stock Target & Stock Stop
+          T_after = max((short_dte - 5) / 365.0, 2.0 / 365.0)
+          opt_at_tgt, _ = _bs_price_and_delta(target_price, K, T_after, r=0.045, sigma=m_info["IV_Raw"], opt_type="CALL")
+          opt_at_stp, _ = _bs_price_and_delta(stop_price, K, max((short_dte - 2) / 365.0, 2.0 / 365.0), r=0.045, sigma=m_info["IV_Raw"], opt_type="CALL")
+          # Ensure realistic stop (at least -35% on short-dated option if stock hits stop)
+          opt_at_stp = min(opt_at_stp, mid_px * 0.72)
+          opt_reward = max(opt_at_tgt - mid_px, 0.01)
+          opt_risk = max(mid_px - opt_at_stp, 0.05)
+          opt_rr = round(opt_reward / opt_risk, 2)
+          near_ema_support = (stock_price >= sma150) and (abs(stock_price - ema20) / ema20 <= 0.035 or abs(stock_price - ema50) / ema50 <= 0.035)
+          is_prem_flush = (not below_sma150) and (prem_chg_pct <= -8.0 or near_ema_support)
+          sc_score = -abs(d_val - 0.52) * 50.0 + min(opt_rr, 6.0) * 6.0 + (12.0 if is_prem_flush else 0.0)
+          if sc_score > best_sc_score:
+            best_sc_score = sc_score
+            if is_prem_flush and opt_rr >= 1.8:
+              tag_s = f"🔥 PREMIUM FLUSH CALL ({prem_chg_pct:+.0f}% Dip near Support)"
+              b_cls = "badge-tct-buy"
+            elif tct_prio == 0 and opt_rr >= 1.8:
+              tag_s = "🟢 BREAKOUT / SWING CALL TRIGGER"
+              b_cls = "badge-tct-buy"
+            else:
+              tag_s = "🟡 TACTICAL CALL SPECULATION"
+              b_cls = "badge-tct-watch"
+            best_sc = {
+              "Symbol": sym,
+              "Type": "CALL",
+              "Bucket": "Short-Term Call Bet",
+              "Expiration": short_exp_str,
+              "DTE": short_dte,
+              "Strike": round(K, 2),
+              "Delta": d_val,
+              "Mid": mid_px,
+              "Bid": m_info["Bid"],
+              "Ask": m_info["Ask"],
+              "Contract_Cost": round(mid_px * 100.0, 0),
+              "IV_Pct": m_info["IV_Pct"],
+              "Prem_Chg_Pct": round(prem_chg_pct, 1),
+              "Is_Premium_Flush": bool(is_prem_flush),
+              "BreakEven": round(K + mid_px, 2),
+              "Opt_Target_Px": round(opt_at_tgt, 2),
+              "Opt_Target_Pct": round(((opt_at_tgt - mid_px) / mid_px) * 100.0, 1),
+              "Opt_Stop_Px": round(opt_at_stp, 2),
+              "Opt_Stop_Pct": round(((opt_at_stp - mid_px) / mid_px) * 100.0, 1),
+              "Opt_RR": opt_rr,
+              "Verdict_Badge": b_cls,
+              "Verdict_Text": tag_s
+            }
+        out["Short_Call"] = best_sc
+
+      # Short-Term Tactical PUT (-0.42 to -0.65 Delta — Bearish Breakdown / Hedge)
+      if not s_puts.empty:
+        best_sp = None
+        best_sp_score = -1e9
+        # Bearish downside target: if stock broke below 50-EMA/150-SMA, target -10% drop; else -8%
+        bear_stock_tgt = min(stop_price * 0.94, stock_price * 0.90)
+        bear_stock_stp = max(ema20 * 1.015, stock_price * 1.035)
+        for _, r_p in s_puts.iterrows():
+          K = float(r_p.get("strike", 0.0) or 0.0)
+          if K <= stock_price * 0.85 or K >= stock_price * 1.12:
+            continue
+          m_info = _extract_contract_mid_iv(r_p, stock_price, K, T_short, "PUT")
+          abs_d = abs(m_info["Delta"])
+          if not (0.35 <= abs_d <= 0.68):
+            continue
+          mid_px = m_info["Mid"]
+          T_after = max((short_dte - 5) / 365.0, 2.0 / 365.0)
+          opt_at_tgt, _ = _bs_price_and_delta(bear_stock_tgt, K, T_after, r=0.045, sigma=m_info["IV_Raw"], opt_type="PUT")
+          opt_at_stp, _ = _bs_price_and_delta(bear_stock_stp, K, max((short_dte - 2) / 365.0, 2.0 / 365.0), r=0.045, sigma=m_info["IV_Raw"], opt_type="PUT")
+          opt_at_stp = min(opt_at_stp, mid_px * 0.70)
+          opt_reward = max(opt_at_tgt - mid_px, 0.01)
+          opt_risk = max(mid_px - opt_at_stp, 0.05)
+          opt_rr = round(opt_reward / opt_risk, 2)
+          is_bear_breakdown = bool(below_sma150 or stock_price < ema50)
+          sp_score = -abs(abs_d - 0.50) * 50.0 + min(opt_rr, 6.0) * 6.0 + (15.0 if is_bear_breakdown else 0.0)
+          if sp_score > best_sp_score:
+            best_sp_score = sp_score
+            if is_bear_breakdown:
+              p_tag = "🔴 BEARISH BREAKDOWN PUT (Below 50/150 MA)"
+              p_cls = "badge-tct-sell"
+            else:
+              p_tag = "🛡️ TACTICAL HEDGE / PULLBACK PUT"
+              p_cls = "badge-candidate"
+            best_sp = {
+              "Symbol": sym,
+              "Type": "PUT",
+              "Bucket": "Short-Term Put Bet",
+              "Expiration": short_exp_str,
+              "DTE": short_dte,
+              "Strike": round(K, 2),
+              "Delta": m_info["Delta"],
+              "Mid": mid_px,
+              "Bid": m_info["Bid"],
+              "Ask": m_info["Ask"],
+              "Contract_Cost": round(mid_px * 100.0, 0),
+              "IV_Pct": m_info["IV_Pct"],
+              "BreakEven": round(K - mid_px, 2),
+              "Bear_Stock_Target": round(bear_stock_tgt, 2),
+              "Bear_Stock_Stop": round(bear_stock_stp, 2),
+              "Opt_Target_Px": round(opt_at_tgt, 2),
+              "Opt_Target_Pct": round(((opt_at_tgt - mid_px) / mid_px) * 100.0, 1),
+              "Opt_Stop_Px": round(opt_at_stp, 2),
+              "Opt_Stop_Pct": round(((opt_at_stp - mid_px) / mid_px) * 100.0, 1),
+              "Opt_RR": opt_rr,
+              "Verdict_Badge": p_cls,
+              "Verdict_Text": p_tag
+            }
+        out["Short_Put"] = best_sp
+    except Exception:
+      pass
+  except Exception as e:
+    out["Status"] = f"Option chain lookup note: {str(e)[:60]}"
+  return out
+
+
+@st.cache_data(ttl=120, show_spinner=False)
+def _fetch_live_option_contract_quote_cached(sym, exp_str, strike_val, opt_type, stock_price, refresh_bucket=0):
+  now_dt = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+  try:
+    dt_e = datetime.strptime(str(exp_str)[:10], "%Y-%m-%d")
+    dte = max(0, (dt_e - now_dt).days)
+  except Exception:
+    dte = 30
+  T_yrs = max(dte / 365.0, 1.0 / 365.0)
+  K = float(strike_val)
+  S = float(stock_price)
+  try:
+    tk = yf.Ticker(sym)
+    if str(exp_str)[:10] in (tk.options or []):
+      ch = tk.option_chain(str(exp_str)[:10])
+      df_side = ch.puts if str(opt_type).upper().startswith("P") else ch.calls
+      if df_side is not None and not df_side.empty:
+        sub = df_side.iloc[(df_side["strike"] - K).abs().argsort()[:1]]
+        if not sub.empty:
+          row = sub.iloc[0]
+          m_info = _extract_contract_mid_iv(row, S, float(row["strike"]), T_yrs, opt_type)
+          m_info["DTE"] = dte
+          return m_info
+  except Exception:
+    pass
+  theo_p, d_val = _bs_price_and_delta(S, K, T_yrs, r=0.045, sigma=0.42, opt_type=opt_type)
+  return {
+    "Bid": round(theo_p * 0.97, 2),
+    "Ask": round(theo_p * 1.03, 2),
+    "Last": round(theo_p, 2),
+    "Mid": round(theo_p, 2),
+    "IV_Pct": 42.0,
+    "Delta": round(d_val, 3),
+    "DTE": dte
+  }
+
+def log_options_ledger_entry(action_type, ticker, opt_type, exp_str, strike, contracts, buy_prem, sell_prem, pnl_dollar, pnl_pct, opt_stop, stock_stop, remarks, dt_str=None):
+  entry = {
+    "Date": dt_str or datetime.now().strftime("%Y-%m-%d"),
+    "Timestamp": datetime.now().strftime("%Y-%m-%d %H:%M"),
+    "Action": action_type,
+    "Ticker": ticker,
+    "Option_Type": opt_type,
+    "Expiration": str(exp_str)[:10],
+    "Strike": round(float(strike), 2),
+    "Contracts": int(contracts),
+    "Buy_Premium": round(float(buy_prem), 2),
+    "Sell_Or_Live_Premium": round(float(sell_prem), 2) if sell_prem is not None else round(float(buy_prem), 2),
+    "Gain_Loss_USD": round(float(pnl_dollar), 2) if pnl_dollar is not None else 0.0,
+    "Gain_Loss_Pct": round(float(pnl_pct), 2) if pnl_pct is not None else 0.0,
+    "Option_Stop": round(float(opt_stop), 2) if opt_stop is not None else 0.0,
+    "Stock_Stop": round(float(stock_stop), 2) if stock_stop is not None else 0.0,
+    "Remarks": str(remarks or "").strip()
+  }
+  options_ledger.append(entry)
+  sync_file_to_github(options_ledger, OPTIONS_LEDGER_FILE)
+
+@st.cache_data(ttl=1800, show_spinner=False)
+def fetch_ryan_latest_videos():
+  videos = []
+  rss_urls = [
+    "https://news.google.com/rss/search?q=%22Options+With+Ryan%22+site:youtube.com&hl=en-US&gl=US&ceid=US:en"
+  ]
+  for u in rss_urls:
+    try:
+      req = urllib.request.Request(u, headers={"User-Agent": "Mozilla/5.0"})
+      with urllib.request.urlopen(req, timeout=4.5) as resp:
+        raw_xml = resp.read()
+      root = ET.fromstring(raw_xml)
+      for item in root.findall(".//item")[:6]:
+        t_el = item.find("title")
+        l_el = item.find("link")
+        p_el = item.find("pubDate")
+        if t_el is not None and t_el.text:
+          dt_str = "Recent"
+          if p_el is not None and p_el.text:
+            try:
+              dt_str = email.utils.parsedate_to_datetime(p_el.text).strftime("%Y-%m-%d")
+            except Exception:
+              dt_str = p_el.text[:10]
+          videos.append({
+            "title": t_el.text.rsplit(" - ", 1)[0].strip(),
+            "link": l_el.text if l_el is not None and l_el.text else "https://www.youtube.com/@OptionsWithRyan",
+            "date": dt_str
+          })
+      if videos:
+        break
+    except Exception:
+      continue
+  if not videos:
+    videos = [
+      {"date": "2026-11-14", "title": "Stock Market Warning | My QQQ Hedge + 5 Stocks I'm Looking To Add (ABBV, AXP, MSFT, AAPL, ZM, SPG, NVDA)", "link": "https://www.youtube.com/watch?v=8YeWNhktU1c"},
+      {"date": "2026-11-12", "title": "AI Stocks Rallying | More Upside Ahead? VXN Study + My TQQQ Update", "link": "https://www.youtube.com/watch?v=vdhKw6ywg1Y"},
+      {"date": "2026-11-10", "title": "Stock Market Rally Starting? NVDA News + My $100K+ TQQQ Position", "link": "https://www.youtube.com/watch?v=bZgg7-4I1pI"},
+      {"date": "2026-11-05", "title": "Is The AI Trade Over? Midterm Election Data + My $50k LEAPS Buy", "link": "https://www.youtube.com/watch?v=601dK1SfH9Y"}
+    ]
+  return videos
+
+def render_options_cockpit_tab():
+  st.markdown("<h1>Options Cockpit: LEAPS (85–90Δ) & Tactical Short-Term Bets</h1>", unsafe_allow_html=True)
+  st.markdown(
+    '<div style="background:#0f291e;color:#f4efe6;padding:12px 16px;border-radius:10px;margin-bottom:14px;">'
+    '<div style="font-size:0.75rem;color:#c5a059;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;">'
+    'DUAL-ENGINE OPTIONS STRATEGY · SINGLE-LEG CALLS & PUTS</div>'
+    '<div style="font-size:0.86rem;color:#cbd5e1;margin-top:4px;">'
+    '<b>1. Long Investment LEAPS Calls (9–18 Months Out · 0.85–0.90 Δ):</b> High-intrinsic stock replacement on Stage 2 leaders with low extrinsic time cost (&lt;7%) and ~2.5x–3x capital leverage.<br>'
+    '<b>2. Short-Term Tactical Bets (1–6 Weeks Out · 0.40–0.65 Δ):</b> High-R/R single-leg Calls on temporary news dips ("Premium Flush" near 20/50-EMA support, like MSFT) and single-leg Puts on Stage 4 breakdowns (like NVDA).'
+    '</div></div>',
+    unsafe_allow_html=True
+  )
+
+  if "Options Radar" not in watchlists or not isinstance(watchlists["Options Radar"], list):
+    watchlists["Options Radar"] = ["MSFT", "NVDA", "APP", "AXP", "ABBV", "AMD", "MU", "PLTR", "AVGO", "COHR", "VRT", "HOOD", "ADPT"]
+
+  radar_syms = list(watchlists["Options Radar"])
+  pos_opt_syms = [str(p.get("Ticker", "")).strip().upper() for p in options_positions if p.get("Ticker")]
+  all_opt_syms = list(dict.fromkeys(radar_syms + pos_opt_syms))
+  stock_data_map = fetch_batch_market_data(all_opt_syms, account_size=settings["account_size"]) if all_opt_syms else {}
+  earnings_map = fetch_upcoming_earnings_map(all_opt_syms) if all_opt_syms else {}
+
+  # --- TOP TABS INSIDE OPTIONS COCKPIT ---
+  opt_tab1, opt_tab2 = st.tabs([
+    f"1. Option Chain Formula Scanner ({len(radar_syms)} Radar Stocks)",
+    f"2. My Active Options Portfolio & Ledger ({len(options_positions)} Open Contracts)"
+  ])
+
+  with opt_tab1:
+    rc1, rc2, rc3, rc4 = st.columns([2.2, 1.8, 1.4, 1.0])
+    opt_add_key = "opt_radar_add_in"
+    def _commit_opt_radar_add():
+      raw_s = st.session_state.get(opt_add_key, "").upper().strip()
+      if raw_s:
+        added_any = False
+        for tk in [x.strip() for x in raw_s.replace(",", " ").split() if x.strip()]:
+          if tk not in watchlists["Options Radar"]:
+            watchlists["Options Radar"].insert(0, tk)
+            added_any = True
+        if added_any:
+          sync_file_to_github(watchlists, DATA_FILE)
+          st.toast(f"Added {raw_s} to Options Radar!")
+        try:
+          st.session_state[opt_add_key] = ""
+        except Exception:
+          pass
+
+    with rc1:
+      st.text_input(
+        "Add Ticker to Options Radar",
+        placeholder="+ Add Ticker to Options Radar (e.g. MSFT, APP, NVDA)",
+        label_visibility="collapsed",
+        key=opt_add_key,
+        on_change=_commit_opt_radar_add
+      )
+    with rc2:
+      scan_strategy_mode = st.selectbox(
+        "Strategy View",
+        [
+          "Show Both: LEAPS Call (85–90Δ) + Short-Term Tactical Bet",
+          "Long Investment Only: LEAPS Calls (>9 Months · 0.85–0.90 Δ)",
+          "Short-Term Bets Only: Premium Flush Calls & Breakdown Puts (1–6 Wks)"
+        ],
+        index=0,
+        label_visibility="collapsed"
+      )
+    with rc3:
+      copy_from_folder = st.selectbox(
+        "Import from Watchlist",
+        ["+ Import from Folder..."] + [k for k in watchlists.keys() if k != "Options Radar"],
+        index=0,
+        label_visibility="collapsed"
+      )
+      if copy_from_folder != "+ Import from Folder...":
+        for s_imp in watchlists.get(copy_from_folder, [])[:12]:
+          if s_imp not in watchlists["Options Radar"]:
+            watchlists["Options Radar"].append(s_imp)
+        sync_file_to_github(watchlists, DATA_FILE)
+        st.rerun()
+    with rc4:
+      manage_radar_list = st.checkbox("Edit Radar List", value=False)
+
+    if manage_radar_list:
+      render_watchlist_reorder_panel("Options Radar", key_prefix="opt_rad")
+
+    if radar_syms:
+      pills_opt = "".join([f'<a href="?inspect={s}" target="_self" class="pill">{i+1}. {s}</a>' for i, s in enumerate(radar_syms)])
+      st.markdown(f"<div style='margin:4px 0 10px 0;'><b>Options Radar List:</b> {pills_opt}</div>", unsafe_allow_html=True)
+
+    # Custom Single-Ticker Deep Option Chain Explorer
+    with st.expander("Deep Single-Ticker Option Chain Explorer (Custom Expiration & Delta Filter)", expanded=False):
+      dc1, dc2, dc3, dc4 = st.columns([1.3, 1.3, 1.3, 1.5])
+      deep_sym = dc1.selectbox("Select Stock", radar_syms if radar_syms else ["NVDA"], key="deep_opt_sym")
+      deep_type = dc2.radio("Option Type", ["CALL", "PUT"], horizontal=True, key="deep_opt_type")
+      deep_dte_mode = dc3.selectbox("Expiration Window", ["LEAPS (240–600 DTE)", "Short-Term (5–45 DTE)", "Medium-Term (46–239 DTE)"], key="deep_opt_dte")
+      deep_delta_rng = dc4.slider("Target |Delta| Range", 0.15, 0.98, (0.80, 0.92) if deep_dte_mode.startswith("LEAPS") else (0.35, 0.65), 0.05, key="deep_opt_delta")
+      if deep_sym in stock_data_map:
+        sd = stock_data_map[deep_sym]
+        try:
+          tk_d = yf.Ticker(deep_sym)
+          all_exps = list(tk_d.options or [])
+          now_d = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+          valid_exps = []
+          for e_s in all_exps:
+            d_left = (datetime.strptime(e_s, "%Y-%m-%d") - now_d).days
+            if deep_dte_mode.startswith("LEAPS") and d_left >= 180:
+              valid_exps.append((d_left, e_s))
+            elif deep_dte_mode.startswith("Short-Term") and 3 <= d_left <= 55:
+              valid_exps.append((d_left, e_s))
+            elif deep_dte_mode.startswith("Medium-Term") and 45 <= d_left <= 240:
+              valid_exps.append((d_left, e_s))
+          if not valid_exps and all_exps:
+            valid_exps = [((datetime.strptime(e_s, "%Y-%m-%d") - now_d).days, e_s) for e_s in all_exps[:4]]
+          if valid_exps:
+            chosen_dte, chosen_exp = st.selectbox("Select Exact Expiration Date", valid_exps, format_func=lambda x: f"{x[1]} ({x[0]} DTE)", key="deep_exp_sel")
+            ch_d = tk_d.option_chain(chosen_exp)
+            df_s = ch_d.calls if deep_type == "CALL" else ch_d.puts
+            rows_deep = []
+            T_y = max(chosen_dte / 365.0, 1.0 / 365.0)
+            for _, rw in df_s.iterrows():
+              K_v = float(rw.get("strike", 0.0) or 0.0)
+              mi = _extract_contract_mid_iv(rw, sd["Price"], K_v, T_y, deep_type)
+              if deep_delta_rng[0] <= abs(mi["Delta"]) <= deep_delta_rng[1]:
+                be_px = K_v + mi["Mid"] if deep_type == "CALL" else K_v - mi["Mid"]
+                rows_deep.append({
+                  "Expiration": chosen_exp,
+                  "DTE": chosen_dte,
+                  "Type": deep_type,
+                  "Strike ($)": K_v,
+                  "Delta": mi["Delta"],
+                  "Mid ($)": mi["Mid"],
+                  "Bid ($)": mi["Bid"],
+                  "Ask ($)": mi["Ask"],
+                  "Cost / 1 Contract ($)": round(mi["Mid"] * 100.0, 0),
+                  "Extrinsic %": mi["Extrinsic_Pct"],
+                  "IV %": mi["IV_Pct"],
+                  "Break-Even ($)": round(be_px, 2),
+                  "Volume": mi["Volume"],
+                  "Open Interest": mi["OpenInterest"]
+                })
+            if rows_deep:
+              st.dataframe(pd.DataFrame(rows_deep), use_container_width=True, hide_index=True)
+            else:
+              st.caption("No strikes matched that exact Delta filter on this expiration—widen the Delta slider slightly.")
+        except Exception as e:
+          st.caption(f"Chain note: {str(e)[:80]}")
+
+    st.markdown("---")
+    # Render Formula Picks for each stock in Options Radar
+    for sym in radar_syms:
+      if sym not in stock_data_map:
+        continue
+      d = stock_data_map[sym]
+      prev_c = d["Price"] - d["Change"]
+      opt_rec = fetch_ticker_options_recommendations_cached(
+        sym, d["Price"], prev_c, d["BOS_Level"], d["Target_Price"], d["Stop_Price"],
+        d["EMA20_Val"], d["EMA50_Val"], d["SMA150_Val"], d["TCT_Model"], d["TCT_Action"],
+        d["TCT_Priority"], d.get("Below_SMA150", False)
+      )
+      earn_warn = ""
+      if sym in earnings_map:
+        d_left, dt_s = earnings_map[sym]
+        imp_m = f" · Priced-In Move: ±{opt_rec['Implied_Move_Pct']:.1f}%" if opt_rec.get("Implied_Move_Pct") else ""
+        earn_warn = f'<span class="badge badge-earn-warn" style="margin-left:8px;">⚡ EARNINGS IN {d_left}d ({dt_s}){imp_m}</span>'
+
+      arr_o = "▲ +" if d["Change"] >= 0 else "▼ -"
+      clr_o = "#15803d" if d["Change"] >= 0 else "#b91c1c"
+      st.markdown(
+        f'<div class="stock-card" style="padding:14px 18px;margin-bottom:14px;">'
+        f'<div style="display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #eae5dc;padding-bottom:8px;margin-bottom:10px;">'
+        f'<div><a href="?inspect={sym}" target="_self" class="ticker-link">{sym}</a> '
+        f'<span style="font-size:1.25rem;font-weight:800;margin-left:8px;">${d["Price"]:,.2f}</span> '
+        f'<span style="color:{clr_o};font-weight:700;font-size:0.9rem;">{arr_o}${abs(d["Change"]):.2f} ({d["Change_Pct"]:+.2f}%)</span>'
+        f'<span class="badge {d["TCT_Badge"]}" style="margin-left:8px;">{d["TCT_Action"]}</span>{earn_warn}</div>'
+        f'<div style="font-size:0.80rem;color:#475569;"><b>{d["TCT_Model"]}</b> · Stock Trigger: <b>${d["BOS_Level"]:,.2f}</b> · Stock Target: <b style="color:#15803d;">${d["Target_Price"]:,.2f}</b> · Stock Stop: <b style="color:#b91c1c;">${d["Stop_Price"]:,.2f}</b></div>'
+        f'</div></div>',
+        unsafe_allow_html=True
+      )
+
+      leaps_c = opt_rec.get("LEAPS_Call")
+      short_c = opt_rec.get("Short_Call")
+      short_p = opt_rec.get("Short_Put")
+
+      col_l, col_s = st.columns(2)
+      if scan_strategy_mode.startswith("Show Both") or scan_strategy_mode.startswith("Long Investment"):
+        with (col_l if scan_strategy_mode.startswith("Show Both") else st.container()):
+          if leaps_c:
+            st.markdown(
+              f'<div style="background:#f8fafc;border:1px solid #cbd5e1;border-radius:8px;padding:12px 14px;margin-bottom:8px;">'
+              f'<div style="display:flex;justify-content:space-between;align-items:center;">'
+              f'<span style="font-weight:800;color:#0f291e;font-size:0.92rem;">🏛️ LONG INVESTMENT: LEAPS CALL (85–90% Δ)</span>'
+              f'<span class="badge {leaps_c["Verdict_Badge"]}">{leaps_c["Verdict_Text"]}</span></div>'
+              f'<div style="font-size:1.05rem;font-weight:800;color:#0f291e;margin-top:6px;">'
+              f'{sym} {leaps_c["Expiration"]} (${leaps_c["Strike"]:,.2f} CALL) · {leaps_c["DTE"]} DTE · Delta: {leaps_c["Delta"]:.2f}</div>'
+              f'<div style="font-size:0.83rem;color:#334155;margin-top:4px;line-height:1.55;">'
+              f'<b>Mid Price:</b> ${leaps_c["Mid"]:,.2f} (Bid ${leaps_c["Bid"]:,.2f} / Ask ${leaps_c["Ask"]:,.2f}) · <b>1 Contract Cost:</b> ${leaps_c["Contract_Cost"]:,.0f}<br>'
+              f'<b>Intrinsic / Extrinsic:</b> ${leaps_c["Intrinsic"]:,.2f} / ${leaps_c["Extrinsic"]:,.2f} (<b>{leaps_c["Extrinsic_Pct"]:.1f}%</b> time fee) · <b>Leverage:</b> {leaps_c["Leverage"]:.1f}x · <b>Break-Even:</b> ${leaps_c["BreakEven"]:,.2f}<br>'
+              f'<b>Est. Option @ Stock Target (${d["Target_Price"]:,.2f}):</b> <span style="color:#15803d;font-weight:700;">${leaps_c["Opt_Target_Px"]:,.2f} ({leaps_c["Opt_Target_Pct"]:+.1f}%)</span> · '
+              f'<b>Est. Option @ Stock Stop (${d["Stop_Price"]:,.2f}):</b> <span style="color:#b91c1c;font-weight:700;">${leaps_c["Opt_Stop_Px"]:,.2f} ({leaps_c["Opt_Stop_Pct"]:+.1f}%)</span> · '
+              f'<b>Option R/R:</b> <span style="background:#dcfce7;color:#15803d;padding:1px 6px;border-radius:4px;font-weight:800;">{leaps_c["Opt_RR"]:.2f}R</span>'
+              f'</div></div>',
+              unsafe_allow_html=True
+            )
+            if st.button(f"+ Log {sym} ${leaps_c['Strike']:g} LEAPS Call ({leaps_c['Expiration']})", key=f"log_leaps_{sym}"):
+              new_opt = {
+                "id": f"{sym}_CALL_{int(time.time())}",
+                "Ticker": sym,
+                "Option_Type": "CALL",
+                "Strategy": "LEAPS Call (0.85-0.90 Δ)",
+                "Expiration": leaps_c["Expiration"],
+                "Strike": float(leaps_c["Strike"]),
+                "Contracts": 1,
+                "Buy_Premium": float(leaps_c["Mid"]),
+                "Buy_Date": datetime.now().strftime("%Y-%m-%d"),
+                "Stock_Entry": float(d["Price"]),
+                "Stock_Stop": float(d["Stop_Price"]),
+                "Stock_Target": float(d["Target_Price"]),
+                "Option_Stop": float(leaps_c["Opt_Stop_Px"]),
+                "Option_Target": float(leaps_c["Opt_Target_Px"]),
+                "HalfSold": False,
+                "Remarks": f"LEAPS {leaps_c['Delta']:.2f}Δ ({leaps_c['DTE']} DTE) · {d['TCT_Model']}"
+              }
+              options_positions.append(new_opt)
+              sync_file_to_github(options_positions, OPTIONS_POSITIONS_FILE)
+              log_options_ledger_entry("BUY OPEN", sym, "CALL", leaps_c["Expiration"], leaps_c["Strike"], 1, leaps_c["Mid"], leaps_c["Mid"], 0.0, 0.0, leaps_c["Opt_Stop_Px"], d["Stop_Price"], new_opt["Remarks"])
+              st.success(f"Logged {sym} {leaps_c['Expiration']} ${leaps_c['Strike']:g} CALL to Active Options!")
+              st.rerun()
+          else:
+            st.caption(f"No 0.80–0.92 Delta LEAPS Call found for {sym}.")
+
+      if scan_strategy_mode.startswith("Show Both") or scan_strategy_mode.startswith("Short-Term"):
+        with (col_s if scan_strategy_mode.startswith("Show Both") else st.container()):
+          # Choose whether to highlight the Short-Term Call (Dip-Buy / Breakout) or Short-Term Put (Bearish Breakdown)
+          show_put_first = bool(d.get("Below_SMA150") or d["TCT_Priority"] == 4)
+          chosen_short = short_p if (show_put_first and short_p) else (short_c or short_p)
+          alt_short = short_c if chosen_short == short_p else short_p
+          if chosen_short:
+            is_put = chosen_short["Type"] == "PUT"
+            s_tgt_ref = chosen_short.get("Bear_Stock_Target", d["Target_Price"]) if is_put else d["Target_Price"]
+            s_stp_ref = chosen_short.get("Bear_Stock_Stop", d["Stop_Price"]) if is_put else d["Stop_Price"]
+            flush_line = f' · <b>Est. 1D Premium Change:</b> <span style="color:{"#15803d" if chosen_short.get("Prem_Chg_Pct",0)<0 else "#475569"};font-weight:700;">{chosen_short.get("Prem_Chg_Pct", 0.0):+.1f}%</span>' if not is_put else ""
+            st.markdown(
+              f'<div style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:12px 14px;margin-bottom:8px;">'
+              f'<div style="display:flex;justify-content:space-between;align-items:center;">'
+              f'<span style="font-weight:800;color:#0f291e;font-size:0.92rem;">⚡ SHORT-TERM TACTICAL BET ({chosen_short["Type"]})</span>'
+              f'<span class="badge {chosen_short["Verdict_Badge"]}">{chosen_short["Verdict_Text"]}</span></div>'
+              f'<div style="font-size:1.05rem;font-weight:800;color:#0f291e;margin-top:6px;">'
+              f'{sym} {chosen_short["Expiration"]} (${chosen_short["Strike"]:,.2f} {chosen_short["Type"]}) · {chosen_short["DTE"]} DTE · Delta: {chosen_short["Delta"]:.2f}</div>'
+              f'<div style="font-size:0.83rem;color:#334155;margin-top:4px;line-height:1.55;">'
+              f'<b>Mid Price:</b> ${chosen_short["Mid"]:,.2f} (Bid ${chosen_short["Bid"]:,.2f} / Ask ${chosen_short["Ask"]:,.2f}) · <b>1 Contract Cost:</b> ${chosen_short["Contract_Cost"]:,.0f} · <b>IV:</b> {chosen_short["IV_Pct"]:.1f}%{flush_line}<br>'
+              f'<b>Break-Even Stock Price:</b> ${chosen_short["BreakEven"]:,.2f} · <b>Stock Target / Stop Used:</b> ${s_tgt_ref:,.2f} / ${s_stp_ref:,.2f}<br>'
+              f'<b>Est. Option @ Target:</b> <span style="color:#15803d;font-weight:700;">${chosen_short["Opt_Target_Px"]:,.2f} ({chosen_short["Opt_Target_Pct"]:+.1f}%)</span> · '
+              f'<b>Est. Option @ Stop:</b> <span style="color:#b91c1c;font-weight:700;">${chosen_short["Opt_Stop_Px"]:,.2f} ({chosen_short["Opt_Stop_Pct"]:+.1f}%)</span> · '
+              f'<b>Option R/R:</b> <span style="background:#dcfce7;color:#15803d;padding:1px 6px;border-radius:4px;font-weight:800;">{chosen_short["Opt_RR"]:.2f}R</span>'
+              f'</div></div>',
+              unsafe_allow_html=True
+            )
+            b_sc1, b_sc2 = st.columns(2)
+            if b_sc1.button(f"+ Log {sym} ${chosen_short['Strike']:g} {chosen_short['Type']} ({chosen_short['Expiration']})", key=f"log_sh1_{sym}"):
+              new_opt = {
+                "id": f"{sym}_{chosen_short['Type']}_{int(time.time())}",
+                "Ticker": sym,
+                "Option_Type": chosen_short["Type"],
+                "Strategy": f"Short-Term {chosen_short['Type']} ({chosen_short['DTE']} DTE)",
+                "Expiration": chosen_short["Expiration"],
+                "Strike": float(chosen_short["Strike"]),
+                "Contracts": 1,
+                "Buy_Premium": float(chosen_short["Mid"]),
+                "Buy_Date": datetime.now().strftime("%Y-%m-%d"),
+                "Stock_Entry": float(d["Price"]),
+                "Stock_Stop": float(s_stp_ref),
+                "Stock_Target": float(s_tgt_ref),
+                "Option_Stop": float(chosen_short["Opt_Stop_Px"]),
+                "Option_Target": float(chosen_short["Opt_Target_Px"]),
+                "HalfSold": False,
+                "Remarks": f"{chosen_short['Verdict_Text']} · {chosen_short['Delta']:.2f}Δ"
+              }
+              options_positions.append(new_opt)
+              sync_file_to_github(options_positions, OPTIONS_POSITIONS_FILE)
+              log_options_ledger_entry("BUY OPEN", sym, chosen_short["Type"], chosen_short["Expiration"], chosen_short["Strike"], 1, chosen_short["Mid"], chosen_short["Mid"], 0.0, 0.0, chosen_short["Opt_Stop_Px"], s_stp_ref, new_opt["Remarks"])
+              st.success(f"Logged {sym} {chosen_short['Expiration']} ${chosen_short['Strike']:g} {chosen_short['Type']}!")
+              st.rerun()
+            if alt_short:
+              with b_sc2.popover(f"View Opposite Side ({alt_short['Type']} ${alt_short['Strike']:g})"):
+                st.markdown(
+                  f"**{sym} {alt_short['Expiration']} ${alt_short['Strike']:,.2f} {alt_short['Type']} ({alt_short['DTE']} DTE)**\n"
+                  f"- **Delta:** `{alt_short['Delta']:.2f}` · **Mid Price:** `${alt_short['Mid']:,.2f}` (`${alt_short['Contract_Cost']:,.0f}`/contract)\n"
+                  f"- **Est. Target / Stop:** `${alt_short['Opt_Target_Px']:,.2f}` (`{alt_short['Opt_Target_Pct']:+.1f}%`) / `${alt_short['Opt_Stop_Px']:,.2f}` (`{alt_short['Opt_Stop_Pct']:+.1f}%`) · **R/R:** `{alt_short['Opt_RR']:.2f}R`"
+                )
+                if st.button(f"Log {sym} ${alt_short['Strike']:g} {alt_short['Type']}", key=f"log_sh2_{sym}"):
+                  alt_is_put = alt_short["Type"] == "PUT"
+                  a_tgt = alt_short.get("Bear_Stock_Target", d["Target_Price"]) if alt_is_put else d["Target_Price"]
+                  a_stp = alt_short.get("Bear_Stock_Stop", d["Stop_Price"]) if alt_is_put else d["Stop_Price"]
+                  new_opt2 = {
+                    "id": f"{sym}_{alt_short['Type']}_{int(time.time())}",
+                    "Ticker": sym,
+                    "Option_Type": alt_short["Type"],
+                    "Strategy": f"Short-Term {alt_short['Type']} ({alt_short['DTE']} DTE)",
+                    "Expiration": alt_short["Expiration"],
+                    "Strike": float(alt_short["Strike"]),
+                    "Contracts": 1,
+                    "Buy_Premium": float(alt_short["Mid"]),
+                    "Buy_Date": datetime.now().strftime("%Y-%m-%d"),
+                    "Stock_Entry": float(d["Price"]),
+                    "Stock_Stop": float(a_stp),
+                    "Stock_Target": float(a_tgt),
+                    "Option_Stop": float(alt_short["Opt_Stop_Px"]),
+                    "Option_Target": float(alt_short["Opt_Target_Px"]),
+                    "HalfSold": False,
+                    "Remarks": f"{alt_short['Verdict_Text']} · {alt_short['Delta']:.2f}Δ"
+                  }
+                  options_positions.append(new_opt2)
+                  sync_file_to_github(options_positions, OPTIONS_POSITIONS_FILE)
+                  log_options_ledger_entry("BUY OPEN", sym, alt_short["Type"], alt_short["Expiration"], alt_short["Strike"], 1, alt_short["Mid"], alt_short["Mid"], 0.0, 0.0, alt_short["Opt_Stop_Px"], a_stp, new_opt2["Remarks"])
+                  st.rerun()
+
+  with opt_tab2:
+    st.markdown("### Active Options Positions & Rule Enforcer (LEAPS & Short-Term Contracts)")
+    # Calculate live portfolio metrics across open option contracts
+    tot_opt_cost = 0.0
+    tot_opt_val = 0.0
+    live_opt_quotes = {}
+    bucket_120 = int(time.time() // 120)
+    for op in options_positions:
+      s_tk = op["Ticker"]
+      s_px = float(stock_data_map.get(s_tk, {}).get("Price", op.get("Stock_Entry", 100.0)))
+      q_info = _fetch_live_option_contract_quote_cached(
+        s_tk, op["Expiration"], op["Strike"], op["Option_Type"], s_px, refresh_bucket=bucket_120
+      )
+      live_opt_quotes[op["id"]] = q_info
+      qty = int(op.get("Contracts", 1))
+      b_prem = float(op.get("Buy_Premium", 1.0))
+      lv_prem = float(q_info.get("Mid", b_prem))
+      tot_opt_cost += qty * b_prem * 100.0
+      tot_opt_val += qty * lv_prem * 100.0
+
+    opt_unreal_pnl = tot_opt_val - tot_opt_cost
+    opt_unreal_pct = (opt_unreal_pnl / tot_opt_cost * 100.0) if tot_opt_cost > 0 else 0.0
+    opt_realized_tot = sum(float(x.get("Gain_Loss_USD", 0.0)) for x in options_ledger if x.get("Action") in ("SELL PARTIAL", "CLOSE"))
+
+    om1, om2, om3, om4 = st.columns(4)
+    om1.metric("Total Options Cost Basis", f"${tot_opt_cost:,.2f}")
+    om2.metric("Current Options Market Value", f"${tot_opt_val:,.2f}")
+    om3.metric("Open Options Unrealized P&L", f"${opt_unreal_pnl:+,.2f}", f"{opt_unreal_pct:+.2f}%")
+    om4.metric("Closed Options Realized P&L", f"${opt_realized_tot:+,.2f}")
+
+    with st.expander("Log a New Option Trade Manually (LEAPS Call or Short-Term Call/Put)", expanded=not bool(options_positions)):
+      oc1, oc2, oc3, oc4, oc5, oc6 = st.columns([1.1, 1.0, 1.4, 1.2, 1.0, 1.2])
+      m_sym = oc1.text_input("Ticker", placeholder="e.g. NVDA", key="m_opt_sym").upper().strip()
+      m_type = oc2.selectbox("Type", ["CALL", "PUT"], key="m_opt_type")
+      m_strat = oc3.selectbox("Strategy", ["LEAPS Call (0.85-0.90 Δ)", "Short-Term Call Bet", "Short-Term Put Bet", "Pre-Earnings Speculative"], key="m_opt_strat")
+      m_exp = oc4.text_input("Expiration (YYYY-MM-DD)", value="2027-09-17", key="m_opt_exp").strip()
+      m_strk = oc5.number_input("Strike ($)", min_value=0.5, value=150.0, step=2.5, key="m_opt_strk")
+      m_qty = oc6.number_input("Contracts", min_value=1, value=1, step=1, key="m_opt_qty")
+
+      oc7, oc8, oc9, oc10, oc11 = st.columns([1.2, 1.2, 1.2, 1.2, 2.2])
+      m_bprem = oc7.number_input("Buy Premium ($/sh)", min_value=0.05, value=15.0, step=0.5, key="m_opt_bprem")
+      default_opt_stp = round(m_bprem * (0.78 if m_strat.startswith("LEAPS") else 0.65), 2)
+      default_opt_tgt = round(m_bprem * (1.40 if m_strat.startswith("LEAPS") else 1.80), 2)
+      m_ostp = oc8.number_input("Option Stop ($/sh)", min_value=0.01, value=default_opt_stp, step=0.5, key="m_opt_ostp")
+      m_otgt = oc9.number_input("Option Target ($/sh)", min_value=0.05, value=default_opt_tgt, step=0.5, key="m_opt_otgt")
+      m_sstp = oc10.number_input("Stock Stop ($)", min_value=0.01, value=100.0, step=1.0, key="m_opt_sstp")
+      m_rmk = oc11.text_input("Remarks / Thesis", placeholder="e.g. 0.88 Delta LEAPS on Stage 2 pullback; or NVDA next-week breakdown put", key="m_opt_rmk")
+
+      if st.button("Save Option Contract to Portfolio", type="primary", key="m_opt_save_btn"):
+        if m_sym:
+          s_curr = float(stock_data_map.get(m_sym, {}).get("Price", m_strk))
+          new_op = {
+            "id": f"{m_sym}_{m_type}_{int(time.time())}",
+            "Ticker": m_sym,
+            "Option_Type": m_type,
+            "Strategy": m_strat,
+            "Expiration": m_exp,
+            "Strike": float(m_strk),
+            "Contracts": int(m_qty),
+            "Buy_Premium": float(m_bprem),
+            "Buy_Date": datetime.now().strftime("%Y-%m-%d"),
+            "Stock_Entry": s_curr,
+            "Stock_Stop": float(m_sstp),
+            "Stock_Target": round(s_curr * (1.15 if m_type == "CALL" else 0.88), 2),
+            "Option_Stop": float(m_ostp),
+            "Option_Target": float(m_otgt),
+            "HalfSold": False,
+            "Remarks": m_rmk.strip()
+          }
+          options_positions.append(new_op)
+          sync_file_to_github(options_positions, OPTIONS_POSITIONS_FILE)
+          log_options_ledger_entry("BUY OPEN", m_sym, m_type, m_exp, m_strk, m_qty, m_bprem, m_bprem, 0.0, 0.0, m_ostp, m_sstp, m_rmk)
+          if m_sym not in watchlists["Options Radar"]:
+            watchlists["Options Radar"].append(m_sym)
+            sync_file_to_github(watchlists, DATA_FILE)
+          st.success(f"Logged {m_qty}x {m_sym} {m_exp} ${m_strk:g} {m_type} @ ${m_bprem:.2f}!")
+          st.rerun()
+
+    st.markdown("---")
+    if options_positions:
+      for idx_o, op in enumerate(options_positions):
+        sym = op["Ticker"]
+        o_type = op.get("Option_Type", "CALL")
+        exp_s = op.get("Expiration", "N/A")
+        strk = float(op.get("Strike", 0.0))
+        qty = int(op.get("Contracts", 1))
+        b_prem = float(op.get("Buy_Premium", 1.0))
+        o_stp = float(op.get("Option_Stop", b_prem * 0.70))
+        o_tgt = float(op.get("Option_Target", b_prem * 1.50))
+        s_stp = float(op.get("Stock_Stop", 0.0))
+        s_live = float(stock_data_map.get(sym, {}).get("Price", op.get("Stock_Entry", strk)))
+        q_live = live_opt_quotes.get(op["id"], {"Mid": b_prem, "Delta": 0.50, "DTE": 30, "IV_Pct": 40.0})
+        lv_prem = float(q_live.get("Mid", b_prem))
+        dte_rem = int(q_live.get("DTE", 30))
+        lv_delta = float(q_live.get("Delta", 0.50))
+        cost_usd = qty * b_prem * 100.0
+        mkt_usd = qty * lv_prem * 100.0
+        pnl_usd = mkt_usd - cost_usd
+        pnl_pct = ((lv_prem - b_prem) / b_prem) * 100.0 if b_prem > 0 else 0.0
+        clr_p = "#15803d" if pnl_usd >= 0 else "#b91c1c"
+        rmk_o = op.get("Remarks", "") or op.get("Strategy", "")
+
+        cp1, cp2, cp3 = st.columns([1.7, 4.4, 1.9])
+        with cp1:
+          st.markdown(
+            f"**<a href='?inspect={sym}' target='_self' class='ticker-link'>{sym}</a> "
+            f"<span class='badge {'badge-tct-buy' if o_type=='CALL' else 'badge-tct-sell'}'>{o_type}</span>**<br>"
+            f"<span style='font-size:1.02rem;font-weight:800;color:#0f291e;'>{exp_s} · ${strk:,.2f} Strike</span><br>"
+            f"<span style='font-size:0.80rem;color:#475569;'><b>DTE:</b> {dte_rem}d · <b>Delta:</b> {lv_delta:.2f} · <b>Stock:</b> ${s_live:,.2f}</span>",
+            unsafe_allow_html=True
+          )
+        with cp2:
+          st.markdown(
+            f"<div style='display:flex;justify-content:space-between;padding:8px 12px;background:#f8f9fa;border-radius:8px;border:1px solid #e2e8f0;'>"
+            f"<div><span style='font-size:0.73rem;color:#64748b;'>Buy Prem & Qty</span><br><b>${b_prem:,.2f}</b> <span style='font-size:0.76rem;'>({qty}x = ${cost_usd:,.0f})</span></div>"
+            f"<div><span style='font-size:0.73rem;color:#64748b;'>Live Mid Prem</span><br><b>${lv_prem:,.2f}</b> <span style='font-size:0.76rem;'>(${mkt_usd:,.0f})</span></div>"
+            f"<div><span style='font-size:0.73rem;color:#64748b;'>Option Stop</span><br><b style='color:#dc2626;'>${o_stp:,.2f}</b></div>"
+            f"<div><span style='font-size:0.73rem;color:#64748b;'>Option Target</span><br><b style='color:#059669;'>${o_tgt:,.2f}</b></div>"
+            f"<div><span style='font-size:0.73rem;color:#64748b;'>Unrealized P&L</span><br><b style='color:{clr_p};'>${pnl_usd:+,.2f} ({pnl_pct:+.1f}%)</b></div>"
+            f"</div>"
+            f"<div style='font-size:0.80rem;color:#334155;margin-top:5px;'><b>Stock Trigger Stop:</b> ${s_stp:,.2f} · <b>Thesis:</b> <i>{rmk_o}</i></div>",
+            unsafe_allow_html=True
+          )
+          # Rule Enforcer Warnings for Options
+          stock_stop_hit = (o_type == "CALL" and s_stp > 0 and s_live <= s_stp) or (o_type == "PUT" and s_stp > 0 and s_live >= s_stp)
+          if lv_prem <= o_stp:
+            st.error(f"🚨 OPTION STOP-LOSS HIT: {sym} ${strk:g} {o_type} premium (${lv_prem:,.2f}) dropped to/below your Option Stop (${o_stp:,.2f})! Cut loss to protect capital.")
+          elif stock_stop_hit:
+            st.error(f"🚨 UNDERLYING STOCK STOP HIT: {sym} stock (${s_live:,.2f}) violated your Stock Stop (${s_stp:,.2f})! Exit the option before further delta/theta loss.")
+          elif lv_prem >= o_tgt and not op.get("HalfSold", False):
+            st.warning(f"🎯 OPTION PROFIT TARGET REACHED (${lv_prem:,.2f} >= ${o_tgt:,.2f})! Open 'Manage Option' to Sell 50% or lock in your profit stop.")
+          elif "LEAPS" in str(op.get("Strategy", "")) and dte_rem <= 120:
+            st.warning(f"⏳ LEAPS 120-DTE ROLL WARNING: Only {dte_rem} DTE remaining. Roll out to a 9–12 month expiration or close to avoid accelerating Theta decay.")
+          elif dte_rem <= 4:
+            st.warning(f"⚠️ EXPIRATION WARNING: Only {dte_rem} DTE left on this short-term contract—close or roll before expiration!")
+        with cp3:
+          with st.popover("Manage Option", use_container_width=True):
+            st.markdown(f"**Manage `{sym} {exp_s} ${strk:g} {o_type}` ({qty}x)**")
+            ot1, ot2, ot3 = st.tabs(["Sell/Trim", "Trail Stop", "Close/Delete"])
+            with ot1:
+              trim_qty = st.number_input("Contracts to Sell", min_value=1, max_value=max(1, qty), value=max(1, qty // 2), key=f"otrim_q_{op['id']}")
+              trim_px = st.number_input("Sell Premium ($/sh)", min_value=0.01, value=float(round(lv_prem, 2)), step=0.25, key=f"otrim_px_{op['id']}")
+              new_ostp_after = st.number_input("Raise Option Stop on Remaining ($/sh)", min_value=0.01, value=float(round(b_prem, 2)), step=0.25, key=f"otrim_stp_{op['id']}")
+              if st.button("Execute Partial Option Sale", type="primary", use_container_width=True, key=f"otrim_btn_{op['id']}"):
+                r_usd = (trim_px - b_prem) * trim_qty * 100.0
+                r_pct = ((trim_px - b_prem) / b_prem) * 100.0 if b_prem > 0 else 0.0
+                log_options_ledger_entry("SELL PARTIAL", sym, o_type, exp_s, strk, trim_qty, b_prem, trim_px, r_usd, r_pct, new_ostp_after, s_stp, f"Trimmed {trim_qty}x @ ${trim_px:.2f}")
+                rem_q = qty - trim_qty
+                if rem_q <= 0:
+                  options_positions.pop(idx_o)
+                else:
+                  options_positions[idx_o]["Contracts"] = rem_q
+                  options_positions[idx_o]["HalfSold"] = True
+                  options_positions[idx_o]["Option_Stop"] = round(float(new_ostp_after), 2)
+                sync_file_to_github(options_positions, OPTIONS_POSITIONS_FILE)
+                st.rerun()
+            with ot2:
+              upd_ostp = st.number_input("New Option Stop ($/sh)", min_value=0.01, value=float(round(o_stp, 2)), step=0.25, key=f"otrail_ostp_{op['id']}")
+              upd_otgt = st.number_input("New Option Target ($/sh)", min_value=0.05, value=float(round(o_tgt, 2)), step=0.5, key=f"otrail_otgt_{op['id']}")
+              upd_sstp = st.number_input("New Underlying Stock Stop ($)", min_value=0.01, value=float(round(s_stp, 2)), step=0.5, key=f"otrail_sstp_{op['id']}")
+              if st.button("Save Updated Stops & Target", type="primary", use_container_width=True, key=f"otrail_btn_{op['id']}"):
+                options_positions[idx_o]["Option_Stop"] = round(float(upd_ostp), 2)
+                options_positions[idx_o]["Option_Target"] = round(float(upd_otgt), 2)
+                options_positions[idx_o]["Stock_Stop"] = round(float(upd_sstp), 2)
+                sync_file_to_github(options_positions, OPTIONS_POSITIONS_FILE)
+                st.rerun()
+            with ot3:
+              close_prem = st.number_input("Full Exit Sell Premium ($/sh)", min_value=0.01, value=float(round(lv_prem, 2)), step=0.25, key=f"oclose_px_{op['id']}")
+              close_note = st.text_input("Exit Note", value="Closed option position", key=f"oclose_rmk_{op['id']}")
+              if st.button("Close Option Position & Log to Ledger", type="primary", use_container_width=True, key=f"oclose_btn_{op['id']}"):
+                r_usd = (close_prem - b_prem) * qty * 100.0
+                r_pct = ((close_prem - b_prem) / b_prem) * 100.0 if b_prem > 0 else 0.0
+                log_options_ledger_entry("CLOSE", sym, o_type, exp_s, strk, qty, b_prem, close_prem, r_usd, r_pct, o_stp, s_stp, f"{rmk_o} | {close_note}".strip(" |"))
+                options_positions.pop(idx_o)
+                sync_file_to_github(options_positions, OPTIONS_POSITIONS_FILE)
+                st.rerun()
+              if st.button("Delete Without Logging", use_container_width=True, key=f"odel_btn_{op['id']}"):
+                options_positions.pop(idx_o)
+                sync_file_to_github(options_positions, OPTIONS_POSITIONS_FILE)
+                st.rerun()
+        st.markdown("<hr style='margin:8px 0;'>", unsafe_allow_html=True)
+    else:
+      st.info("No open option contracts tracked yet. Click '+ Log' on any option card in Tab 1 or use 'Log a New Option Trade Manually' above!")
+
+    st.markdown("### Complete Options Trade Ledger & Excel Export")
+    if options_ledger:
+      df_oledger = pd.DataFrame(list(reversed(options_ledger)))
+      st.dataframe(df_oledger, use_container_width=True, hide_index=True)
+      oc_dl1, oc_dl2 = st.columns(2)
+      try:
+        obuf = io.BytesIO()
+        with pd.ExcelWriter(obuf, engine="openpyxl") as writer:
+          df_oledger.to_excel(writer, sheet_name="Options_Ledger", index=False)
+        oc_dl1.download_button(
+          "Download Options Ledger Excel (.xlsx)",
+          data=obuf.getvalue(),
+          file_name=f"options_ledger_{datetime.now().strftime('%Y%m%d')}.xlsx",
+          mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+          type="primary",
+          use_container_width=True,
+          key="dl_opt_xlsx"
+        )
+      except Exception:
+        pass
+      oc_dl2.download_button(
+        "Download Options Ledger CSV (.csv)",
+        data=df_oledger.to_csv(index=False).encode("utf-8"),
+        file_name=f"options_ledger_{datetime.now().strftime('%Y%m%d')}.csv",
+        mime="text/csv",
+        use_container_width=True,
+        key="dl_opt_csv"
+      )
+    else:
+      st.caption("No historical option ledger entries recorded yet.")
+
 @st.cache_data(ttl=1800, show_spinner=False)
 def fetch_sds_latest_videos():
   videos = []
@@ -2043,19 +3004,34 @@ def render_ai_copilot_tab():
   st.markdown("---")
   col_macro, col_chat = st.columns([1.05, 1.45])
   with col_macro:
-    st.subheader("Macro Perspectives & Reference Feeds")
-    st.caption(" External commentary (@sds.getrich) is treated as one reference perspective—always cross-check against global macro data and chart structure.")
-    if st.button("Refresh @sds.getrich Video Feed", use_container_width=True):
-      fetch_sds_latest_videos.clear()
-      st.rerun()
-    vids = fetch_sds_latest_videos()
-    for v in vids[:5]:
-      st.markdown(
-        f'<div style="background:white;border:1px solid #e7e2d9;border-radius:8px;padding:8px 12px;margin-bottom:6px;font-size:0.84rem;">'
-        f'<span class="age-badge" style="margin-left:0;margin-right:6px;">{v["date"]}</span>'
-        f'<a href="{v["link"]}" target="_blank" style="color:#0f291e;font-weight:700;text-decoration:none;">{v["title"]}</a></div>',
-        unsafe_allow_html=True
-      )
+    st.subheader("Macro & Options Reference Feeds")
+    feed_tab_sds, feed_tab_ryan = st.tabs(["@sds.getrich (Macro)", "@OptionsWithRyan (Picks Audit)"])
+    with feed_tab_sds:
+      st.caption("External macro commentary—always cross-check against global macro data and chart structure.")
+      if st.button("Refresh @sds.getrich Feed", use_container_width=True, key="ref_sds_btn"):
+        fetch_sds_latest_videos.clear()
+        st.rerun()
+      vids = fetch_sds_latest_videos()
+      for v in vids[:5]:
+        st.markdown(
+          f'<div style="background:white;border:1px solid #e7e2d9;border-radius:8px;padding:8px 12px;margin-bottom:6px;font-size:0.84rem;">'
+          f'<span class="age-badge" style="margin-left:0;margin-right:6px;">{v["date"]}</span>'
+          f'<a href="{v["link"]}" target="_blank" style="color:#0f291e;font-weight:700;text-decoration:none;">{v["title"]}</a></div>',
+          unsafe_allow_html=True
+        )
+    with feed_tab_ryan:
+      st.caption("Use @OptionsWithRyan for stock idea discovery only—audit his picks against Stage 2 charts and 0.85–0.90Δ LEAPS Calls instead of blind put-selling.")
+      if st.button("Refresh @OptionsWithRyan Feed", use_container_width=True, key="ref_ryan_btn"):
+        fetch_ryan_latest_videos.clear()
+        st.rerun()
+      ryan_vids = fetch_ryan_latest_videos()
+      for rv in ryan_vids[:5]:
+        st.markdown(
+          f'<div style="background:white;border:1px solid #e7e2d9;border-radius:8px;padding:8px 12px;margin-bottom:6px;font-size:0.84rem;">'
+          f'<span class="age-badge" style="margin-left:0;margin-right:6px;">{rv["date"]}</span>'
+          f'<a href="{rv["link"]}" target="_blank" style="color:#0f291e;font-weight:700;text-decoration:none;">{rv["title"]}</a></div>',
+          unsafe_allow_html=True
+        )
     st.markdown("#### Key Macro Themes Under Watch")
     with st.expander("1. Energy / Geopolitics Lagged Inflation & Asian/European Currency Stress", expanded=True):
       st.write(
@@ -2066,11 +3042,29 @@ def render_ai_copilot_tab():
         "Hyperscalers and data-center landlords face rising capital intensity and power/grid bottlenecks. Track where capital rotates across Defense (`ITA`), Industrials (`XLI`), Nuclear/Utilities (`URA`/`CEG`), Healthcare (`XLV`), and optical/networking upgrades (`COHR`/`LITE`)."
       )
     st.markdown("**Quick Interactive Prompts:**")
-    qp1, qp2 = st.columns(2)
+    qp1, qp2, qp3 = st.columns(3)
     prompt_to_send = None
-    if qp1.button("Audit My Open Positions", use_container_width=True):
-      prompt_to_send = "Review my current open positions, unrealized P&L, and stop-losses in English. Which positions need stop adjustments, partial profit-taking, or rotation right now?"
-    if qp2.button("Global Macro & Sector Anticipation", use_container_width=True):
+    if qp1.button("Audit Open Positions", use_container_width=True):
+      prompt_to_send = "Review my current open stock and option positions, unrealized P&L, and stop-losses in English. Which positions need stop adjustments, partial profit-taking, or rotation right now?"
+    if qp2.button("Audit Ryan's Latest Picks", use_container_width=True):
+      ryan_titles = "; ".join([f"[{v['date']}] {v['title']}" for v in fetch_ryan_latest_videos()[:4]])
+      ryan_tks = ["NVDA", "ABBV", "AXP", "MSFT", "AAPL", "ZM", "SPG", "TQQQ", "QQQ", "HOOD", "CRDO", "MU", "PLTR"]
+      r_snap = fetch_batch_market_data(ryan_tks, account_size=settings["account_size"])
+      r_lines = [
+        f"{k}: Close=${v['Price']:.2f} ({v['Change_Pct']:+.2f}%), Playbook={v['TCT_Model']}, Action={v['TCT_Action']}, "
+        f"Trigger=${v['BOS_Level']:.2f}, Target=${v['Target_Price']:.2f}, Stop=${v['Stop_Price']:.2f}, "
+        f"EMA20=${v['EMA20_Val']:.2f}, EMA50=${v['EMA50_Val']:.2f}, SMA150=${v['SMA150_Val']:.2f}, RSI={v['RSI']:.1f}"
+        for k, v in r_snap.items()
+      ]
+      prompt_to_send = (
+        f"Critically audit the latest stock picks from 'Options With Ryan' ({ryan_titles}) in English. "
+        "Do NOT endorse selling puts blindly in a volatile market. Instead, evaluate each of his mentioned stocks "
+        "(including NVDA, ABBV, AXP, MSFT, AAPL, ZM, SPG, and any watchlist overlaps) against our live candlestick data below. "
+        "Tell me: (1) Which of his picks are genuine Stage 2 leaders worthy of a >9-month 0.85-0.90 Delta LEAPS Call or a Short-Term 'Premium Flush' Call on a dip; "
+        "(2) Which of his picks are dangerous value traps or overextended; and (3) Exact Buy Trigger, Stop-Loss, and Target levels.\n\n"
+        + "\n".join(r_lines)
+      )
+    if qp3.button("Macro & Sector Anticipation", use_container_width=True):
       prompt_to_send = "Using second-order anticipation in English, analyze how current oil/inflation/currency trends in Asia and Europe and US policy shifts will impact all 11 sectors over the next 3-6 months, and which watchlist stocks have the strongest chart confirmation."
   with col_chat:
     st.subheader("Interactive Co-Pilot Chat")
@@ -2175,6 +3169,7 @@ navigation = st.sidebar.radio(
   [
     "Dashboard",
     "Active Positions",
+    "Options",
     "Live Real-Time Quotes",
     "Screener",
     "Watchlist",
@@ -2322,6 +3317,13 @@ if st.session_state.inspect_symbol is not None:
       st.markdown(f"**52W High / Low:** `{w52_text}`")
       st.markdown(f"**History High / Low:** `{hist_hl_text}`")
       st.markdown(f"**Earnings Day:** `{earn_text}`")
+      if st.button(f"+ Send {sym} to Options Radar", use_container_width=True, key=f"dos_opt_{sym}"):
+        if "Options Radar" not in watchlists:
+          watchlists["Options Radar"] = []
+        if sym not in watchlists["Options Radar"]:
+          watchlists["Options Radar"].insert(0, sym)
+          sync_file_to_github(watchlists, DATA_FILE)
+        st.success(f"Added {sym} to Options Radar!")
     with c_plot:
       f1, f2, f3, f4, f5, f6 = st.columns(6)
       f1.metric("Price", f"${d['Price']:,.2f}", f"{'+' if d['Change']>=0 else ''}{d['Change_Pct']:.2f}%")
@@ -2580,6 +3582,8 @@ TODAY'S STANDOUT SETUP · {best_pick['TCT_Action']} · {best_pick['TCT_Model']}
         )
   elif navigation == "Active Positions":
     render_active_positions_manager(key_prefix="nav_ap")
+  elif navigation == "Options":
+    render_options_cockpit_tab()
   elif navigation == "AI Macro & Trade Co-Pilot":
     render_ai_copilot_tab()
   elif navigation == "Live Real-Time Quotes":
@@ -2933,11 +3937,18 @@ ${m['Price']:,.2f} · <span style="color:{'#15803d' if m['Change']>=0 else '#b91
         with c3:
           st.plotly_chart(render_sparkline(m["Sparkline"], m["Change"] >= 0), use_container_width=False)
         with c4:
-          if st.button("Add", key=f"add_sc_{m['Ticker']}"):
+          if st.button("Add", use_container_width=True, key=f"add_sc_{m['Ticker']}"):
             if m["Ticker"] not in watchlists[target_add_folder]:
               watchlists[target_add_folder].append(m["Ticker"])
               sync_file_to_github(watchlists, DATA_FILE)
               st.success("Synced!")
+          if st.button("+ Options", use_container_width=True, key=f"opt_sc_{m['Ticker']}"):
+            if "Options Radar" not in watchlists:
+              watchlists["Options Radar"] = []
+            if m["Ticker"] not in watchlists["Options Radar"]:
+              watchlists["Options Radar"].insert(0, m["Ticker"])
+              sync_file_to_github(watchlists, DATA_FILE)
+            st.toast(f"Added {m['Ticker']} to Options Radar!")
   elif navigation == "Watchlist":
     st.markdown("<h1>Watchlists & Multi-Playbook Action Tickets</h1>", unsafe_allow_html=True)
     wl_keys = list(watchlists.keys())
@@ -3100,6 +4111,14 @@ ${m['Price']:,.2f} · <span style="color:{'#15803d' if m['Change']>=0 else '#b91
             f'"{d["TCT_Explain"]}"</div></div>',
             unsafe_allow_html=True
           )
+          if folder != "Options Radar":
+            if st.button(f"+ Add {sym} to Options Radar", key=f"wl_to_opt_{folder}_{sym}"):
+              if "Options Radar" not in watchlists:
+                watchlists["Options Radar"] = []
+              if sym not in watchlists["Options Radar"]:
+                watchlists["Options Radar"].insert(0, sym)
+                sync_file_to_github(watchlists, DATA_FILE)
+              st.toast(f"Sent {sym} to Options Radar!")
   elif navigation == "Precious Metals, Crypto & Currency":
     st.markdown("<h1>Precious Metals, Crypto & Currency</h1>", unsafe_allow_html=True)
     METALS_GROUP = {
