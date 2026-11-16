@@ -50,5 +50,18 @@
     "Gain_Loss_Pct": -1.11,
     "StopLoss": 69.498,
     "Remarks": "No remarks recordedjw day. | Closed full position"
+  },
+  {
+    "Date": "2026-11-16",
+    "Timestamp": "2026-11-16 15:39",
+    "Action": "CLOSE",
+    "Ticker": "ADPT",
+    "Shares": 800,
+    "BuyPrice": 26.68,
+    "SellPrice": 27.69,
+    "Gain_Loss_USD": 808.0,
+    "Gain_Loss_Pct": 3.79,
+    "StopLoss": 29.35,
+    "Remarks": "No remarks recorded. | Closed full position"
   }
 ]
