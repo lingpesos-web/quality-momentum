@@ -7,6 +7,7 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import json
 import os
+import re
 import io
 import math
 import time
@@ -1879,46 +1880,223 @@ def log_options_ledger_entry(action_type, ticker, opt_type, exp_str, strike, con
   options_ledger.append(entry)
   sync_file_to_github(options_ledger, OPTIONS_LEDGER_FILE)
 
-@st.cache_data(ttl=1800, show_spinner=False)
-def fetch_ryan_latest_videos():
-  videos = []
-  rss_urls = [
-    "https://news.google.com/rss/search?q=%22Options+With+Ryan%22+site:youtube.com&hl=en-US&gl=US&ceid=US:en"
-  ]
-  for u in rss_urls:
+KNOWN_VIDEO_TRANSCRIPTS = {
+  "14NkjY9NbKI": {
+    "date": "2026-11-15",
+    "channel": "@sds.getrich (90後創業家掃地僧)",
+    "title": "【突發】黃仁勳出軌辭職只是金蟬脫殼？一場借刀殺人的美股葬禮？美股100%必漲神話徹底破滅！背後到底誰在做局？連巴菲特也進了屠宰場？",
+    "summary_en": (
+      "**1. Breaking the Post-Midterm 100% Win-Rate Myth & Buffett's Trap [00:00:09]:** Since 1950 (19/19 times), US stocks rose 100% of the time in the 12 months after midterm elections. Even Warren Buffett ($370B cash) bought Google around $330 in June ahead of the midterms, yet Google dropped to ~$270–$290 (-18% below Buffett's entry) during the post-election AI sell-off.\n"
+      "**2. Why the Ruling Party Lost Texas — The Data-Center Voter Backlash [00:01:41 – 00:06:36]:** AI data centers consume 24/7 city-scale electricity (driving residential power bills up ~20% while Big Tech gets tax subsidies), drain municipal water reservoirs in Texas for cooling, create 24-hour low-frequency noise pollution, and wipe out white-collar entry-level jobs while hiring only 15–20 local guards/janitors. Voters used their ballots to back opposition candidates promising to freeze new data-center approvals.\n"
+      "**3. 'Tech Capital' vs. 'Financial Capital' (借刀殺人 — Killing with a Borrowed Knife) [00:07:49 – 00:18:02]:** Sweeping Monk divides elites into Tech Capital (builders like Jensen Huang, Musk, Zuckerberg) and Financial Capital (Wall Street funds/banks who own >90% of NVDA and MSFT shares). Wall Street lured Big Tech into burning $200B+/quarter on GPUs until hyperscaler Free Cash Flow turned negative and data-center landlords (CoreWeave) hit 15% borrowing rates. To profit from the short side without taking blame for popping the bubble, Wall Street used voter anger and post-midterm anti-data-center legislation as the 'borrowed knife.'\n"
+      "**4. Jensen Huang's Resignation as 'Golden Cicada Shedding Its Shell' (金蟬脫殼) [00:20:22 – 00:22:28]:** After cashing out shares near the top, Jensen Huang confessed to a personal affair and resigned right after the midterms—shifting public blame onto a personal moral scandal rather than the AI capex bubble itself, escaping being the scapegoat for an AI crash.\n"
+      "**5. The Texas Trap for Elon Musk (關門打狗) [00:22:32 – 00:24:44]:** Musk moved Tesla HQ, SpaceX Starbase, and xAI's supercluster to Texas assuming it was a safe Republican stronghold, while pledging >90% of his TSLA shares as bank loan collateral. With a new Democratic governor in Texas vowing to freeze new data-center permits, Musk is boxed in—and if Wall Street drives TSLA stock down to trigger collateral margin calls, financial capital can acquire his prime AI/space assets on the cheap."
+    ),
+    "anticipation_en": (
+      "**Independent Critique & Second-Order Anticipation:**\n"
+      "- **Where We Agree vs. Disagree:** Local political pushback against power-grid inflation, water scarcity, and data-center tax breaks—plus negative hyperscaler FCF—is a genuine structural headwind for over-leveraged greenfield data-center builders. However, treating the entire market as a 'funeral' misses active capital rotation into high-FCF enterprise software and non-tech sectors.\n"
+      "- **What to Avoid / Tactical Puts (`7–30 DTE`):** Avoid bottom-fishing `NVDA` ahead of binary earnings while below its 20/50-EMA, and watch `TSLA`, `CRWV`, and `ORCL` for collateral/debt-spread pressure if they violate their 50-EMA/150-SMA.\n"
+      "- **Second-Order Winners of 'Data-Center Permitting Freezes':** If new greenfield data centers face permitting freezes in Texas and other states, hyperscalers MUST upgrade existing data centers to squeeze 2x–3x more compute per watt. High-efficiency optical interconnects (`COHR`, `LITE`, `CRDO`) and thermal/power retrofits (`VRT`) become critical—wait for a confirmed **Stage 2 Higher Low (`Playbook 7`)** or **20-EMA Pullback (`Playbook 3`)** to enter `0.85–0.90 Δ` LEAPS Calls.\n"
+      "- **Zero-Capex Cash-Cow Rotation (`0.85–0.90 Δ` LEAPS):** Capital rotating out of heavy-capex GPU buyers flows into asset-light cash cows with pricing power: Affluent Financials (`AXP`, `JPM`), Healthcare/Biotech (`ABBV`, `LLY`, `ADPT`), and Trade-Down Retail (`COST`, `WMT`)."
+    )
+  },
+  "u7XIeJEMuuI": {
+    "date": "2026-11-08",
+    "channel": "@sds.getrich (90後創業家掃地僧)",
+    "title": "【突發】AI股災金融危機，台灣經濟將失去30年？經濟越差越賺錢的行業？AI是怎麼綁架亞洲經濟，這次沒有局外人？誰正在為此付出代價？",
+    "summary_en": (
+      "**1. Asian Markets Hit Harder Than the US [00:00:16]:** While US tech pulled back ~15% (GOOGL -32%, INTC -63%, NVDA -25%, SOXX -39%), South Korea crashed -47%, Taiwan -24%, and Japan -22% because Asian economies are structurally hostage to the US AI supply chain.\n"
+      "**2. 'Taiwan Disease' & The Hidden Currency Tax on Asia [00:00:58 – 00:07:58]:** Using The Economist's Big Mac Index, TWD is undervalued by ~55%. Weak Asian currencies (TWD, KRW, JPY) subsidize semiconductor exports (70% of Taiwan's exports, employing <10% of the workforce) while forcing the other 90% of citizens to pay a regressive 'hidden inflation tax' on imported energy, food, and housing.\n"
+      "**3. Negative Hyperscaler FCF & The AI Credit Chain (`A -> B -> C`) [00:09:08 – 00:19:13]:** Amazon (-$30B FCF), Google (-$9B FCF, as AI cannibalizes search ad clicks by -26.8%), and Meta are burning more cash than they make. In the credit chain: `A` (retail pensions/insurance) lends to `B` (AI landlords like CoreWeave with $30B+ debt at 15% interest and >60% default odds), who rents GPUs to `C` (OpenAI losing $8.5B/quarter with $600B compute bills). Because GPU collateral depreciates like fresh vegetables when new chips launch, a default by `C` breaks `B` and freezes Asian factory orders.\n"
+      "**4. Three Counter-Cyclical Industries That Thrive in a Downturn [00:21:00 – 00:26:29]:** (1) **Dignified Trade-Down Dining & Apparel** (like Yoshinoya and Uniqlo in post-1990 Japan); (2) **Second-Hand & Rental Economy** (buying 'usage rights' instead of ownership); (3) **Low-Cost Digital & AI Escapism** (short dramas, gaming, AI media, manga cafes)."
+    ),
+    "anticipation_en": (
+      "**Independent Critique & Second-Order Anticipation:**\n"
+      "- **Asian FX & Equity Vulnerability:** Confirms your core macro thesis—energy-importing Asian economies (`EWY`, `EWJ`, `FXI`) suffer a double whammy of imported energy inflation + currency depreciation + concentrated tech export risk.\n"
+      "- **Actionable US Equity & Options Rotation:** Favor US-listed trade-down & value powerhouses (`COST`, `WMT`, `TJX`, `MCD`) and high-engagement digital entertainment (`NFLX`, `APP`, `SPOT`, `TTWO`) when their daily charts confirm Stage 2 Higher Lows."
+    )
+  },
+  "wdRng1DAh5c": {
+    "date": "2026-11-01",
+    "channel": "@sds.getrich (90後創業家掃地僧)",
+    "title": "【突發】廣場協議毀了日本，又將摧毀中國？不想陪葬就趕快逃生？人民幣暴漲是一場騙局？中國3兆美元被餓狼盯上，經濟將失去30年？",
+    "summary_en": (
+      "**Core Thesis:** Compares current currency and trade pressure on China's $3T foreign-exchange reserves to the 1985 Plaza Accord that triggered Japan's asset bubble and lost decades. Warns that rapid currency swings combined with tariff barriers can trap export-reliant manufacturers and domestic real estate."
+    ),
+    "anticipation_en": (
+      "**Second-Order Anticipation:** Avoid unhedged exposure to export-heavy Asian cyclicals (`FXI`, `EWY`) when trading below their 150-SMA; favor USD liquidity beneficiaries, gold/silver hard assets (`GLD`, `SLV`), and US domestic pricing-power leaders."
+    )
+  },
+  "8YeWNhktU1c": {
+    "date": "2026-11-14",
+    "channel": "@OptionsWithRyan (Options With Ryan)",
+    "title": "Stock Market Warning | My QQQ Hedge + 5 Stocks I'm Looking To Add (ABBV, AXP, MSFT, AAPL, ZM, SPG, NVDA)",
+    "summary_en": (
+      "**1. Macro & Volatility Setup [00:03:07 – 00:14:50]:** Oil at ~$88/bbl; 10-Year Treasury Yield spiked to `5.1%` after hot CPI; CME FedWatch prices an `88%` chance of a Dec rate hike plus 3 more hikes in 2027 (though Ryan cites 'Nowflation' at 1.28% to stay bullish). VIX hit 20 and Nasdaq VXN closed at 29. Ryan holds `3,430 shares of TQQQ` ($57.08 avg, 5% cash) and added 7x `QQQ 610/545 Bear Put Spreads` as a crash hedge.\n"
+      "**2. Ryan's 6+1 Stock & Option Pitches [00:15:10 – 00:25:30]:**\n"
+      "- **`NVDA` [00:15:13]:** Sold 3x `$148 Cash-Secured Puts` ($1,400 premium) right before Tuesday's earnings despite Jensen Huang stepping down and $1.4T market cap loss.\n"
+      "- **`ABBV` (AbbVie) [00:17:10]:** Making new all-time highs during the tech sell-off; waiting for a 5%–10% pullback when capital rotates back to AI.\n"
+      "- **`AXP` (American Express) [00:18:33]:** Pulled back from $340 to ~$320 (18x P/E). Loves the sticky high-income customer base ($890 Platinum / $300+ Gold annual fees) and targets $390–$400.\n"
+      "- **`MSFT` (Microsoft) [00:20:09]:** Holding up well despite yesterday's outage because MSFT is monetizing AI on its balance sheet; looking to add at $480–$500.\n"
+      "- **`AAPL` (Apple) [00:21:06]:** Making new all-time highs at ~40x P/E; Ryan views 40x P/E as too expensive and wants a 5%–10% pullback.\n"
+      "- **`ZM` (Zoom) [00:22:36]:** Under $100; looking to sell Dec 18 (35 DTE) `$90 Puts` (25 Delta) for 3.24% ($282) premium.\n"
+      "- **`SPG` (Simon Property Group) [00:23:55]:** High-end luxury mall REIT (LV, Gucci, Hermès, Rolex tenants resilient to inflation) paying ~4% dividend; wants a 5%–10% pullback."
+    ),
+    "anticipation_en": (
+      "**Our Independent Audit (LEAPS Calls & Tactical Bets vs. Ryan's Put-Selling):**\n"
+      "- **1. `AXP` & `MSFT` — Top Long-Term `0.85–0.90 Δ` LEAPS Call & 'Premium Flush' Candidates (PASS):** `AXP` (affluent recurring fee moat at 18x P/E) and `MSFT` (enterprise AI monetization) have genuine institutional support. Instead of capping upside by selling puts, buy `0.85–0.90 Δ` LEAPS Calls (or a 20–35 DTE 'Premium Flush' Call on `MSFT` dips near its 20/50-EMA).\n"
+      "- **2. `ABBV` — True Relative Strength Leader (WATCH FOR PULLBACK):** Confirmed Stage 2 leader; wait for a **Playbook 3 (`20-EMA Pullback`)** or **Playbook 7 (`Stage 2 Higher Low`)** before entering LEAPS.\n"
+      "- **3. `NVDA` — Dangerous Pre-Earnings Put-Selling (AVOID RYAN'S TRADE):** Selling naked $148 puts into Tuesday's binary earnings while `NVDA` is in a steep breakdown below its 20/50-EMA risks massive assignment losses for a tiny $1,400 credit. In our system, broken charts belong in the **Short-Term Breakdown Put** bucket until they reclaim the 50-EMA.\n"
+      "- **4. `ZM` & `AAPL` (40x P/E) — Skip:** `ZM` is a low-momentum value trap ahead of earnings, and `AAPL` at 40x P/E carries valuation compression risk if 10Y yields stay above 5.0%."
+    )
+  },
+  "vdhKw6ywg1Y": {
+    "date": "2026-11-12",
+    "channel": "@OptionsWithRyan (Options With Ryan)",
+    "title": "AI Stocks Rallying | More Upside Ahead? VXN Study + My TQQQ Update (Options With Ryan)",
+    "summary_en": (
+      "**Core Thesis:** Reviews the Nasdaq Volatility Index (`VXN`) spike above 35 as a historicalwashout indicator and tracks his leveraged `TQQQ` swing position targeting a +20% to +30% rebound."
+    ),
+    "anticipation_en": (
+      "**Independent Audit:** Leverage (`TQQQ` or `0.85–0.90 Δ` LEAPS) should only be deployed when the S&P 500 and QQQ hold above their rising 20-EMA/50-EMA or confirm a higher low—never averaged down blindly into a Stage 4 downtrend."
+    )
+  },
+  "bZgg7-4I1pI": {
+    "date": "2026-11-10",
+    "channel": "@OptionsWithRyan (Options With Ryan)",
+    "title": "Stock Market Rally Starting? NVDA News + My $100K+ TQQQ Position (Options With Ryan)",
+    "summary_en": (
+      "**Core Thesis:** Discusses the initial bounce off the November 5 Nasdaq low, his $100K+ `TQQQ` position, and wheel-strategy setups on high-IV tech stocks."
+    ),
+    "anticipation_en": (
+      "**Independent Audit:** Filter all high-IV tech setups through our 8-Playbook Candlestick Engine; favor `Stage 2 Higher Lows` (`Playbook 7`) over catching falling knives."
+    )
+  },
+  "601dK1SfH9Y": {
+    "date": "2026-11-05",
+    "channel": "@OptionsWithRyan (Options With Ryan)",
+    "title": "Is The AI Trade Over? Midterm Election Data + My $50k LEAPS Buy (Options With Ryan)",
+    "summary_en": (
+      "**Core Thesis:** Examines post-midterm election market seasonality and details his $50,000 deep-ITM LEAPS Call purchase during the VXN volatility spike."
+    ),
+    "anticipation_en": (
+      "**Independent Audit:** Buying `0.85–0.90 Δ` LEAPS >9 months out is a high-edge strategy ONLY when paired with a strict underlying stock stop-loss (such as the 50-EMA or 150-SMA) so a -8% stock drop doesn't turn into a -50% option loss."
+    )
+  }
+}
+
+def _extract_yt_video_id(url_or_id):
+  s = str(url_or_id or "").strip()
+  m = re.search(r"(?:v=|youtu\.be/|shorts/|embed/)([A-Za-z0-9_-]{11})", s)
+  if m:
+    return m.group(1)
+  if len(s) == 11 and all(c.isalnum() or c in "_-" for c in s):
+    return s
+  return ""
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def fetch_youtube_video_transcript_and_context(video_url, fallback_title=""):
+  vid_id = _extract_yt_video_id(video_url)
+  known = KNOWN_VIDEO_TRANSCRIPTS.get(vid_id, {})
+  blocks = []
+  if known:
+    blocks.append(
+      f"=== CURATED VIDEO THESIS & TIMESTAMPS ({known.get('date', '')} · {known.get('title', fallback_title)}) ===\n"
+      f"{known.get('summary_en', '')}\n\n"
+      f"{known.get('anticipation_en', '')}"
+    )
+  if vid_id:
     try:
-      req = urllib.request.Request(u, headers={"User-Agent": "Mozilla/5.0"})
-      with urllib.request.urlopen(req, timeout=4.5) as resp:
-        raw_xml = resp.read()
-      root = ET.fromstring(raw_xml)
-      for item in root.findall(".//item")[:6]:
-        t_el = item.find("title")
-        l_el = item.find("link")
-        p_el = item.find("pubDate")
-        if t_el is not None and t_el.text:
-          dt_str = "Recent"
-          if p_el is not None and p_el.text:
-            try:
-              dt_str = email.utils.parsedate_to_datetime(p_el.text).strftime("%Y-%m-%d")
-            except Exception:
-              dt_str = p_el.text[:10]
-          videos.append({
-            "title": t_el.text.rsplit(" - ", 1)[0].strip(),
-            "link": l_el.text if l_el is not None and l_el.text else "https://www.youtube.com/@OptionsWithRyan",
-            "date": dt_str
-          })
-      if videos:
-        break
+      watch_url = f"https://www.youtube.com/watch?v={vid_id}&hl=en"
+      req = urllib.request.Request(
+        watch_url,
+        headers={
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+          "Accept-Language": "en-US,en;q=0.9,zh-TW;q=0.8,zh;q=0.7"
+        }
+      )
+      with urllib.request.urlopen(req, timeout=6) as resp:
+        html_txt = resp.read().decode("utf-8", errors="ignore")
+      # Extract shortDescription if present
+      m_desc = re.search(r'"shortDescription":"((?:\\.|[^"\\])*)"', html_txt)
+      if m_desc:
+        raw_desc = bytes(m_desc.group(1), "utf-8").decode("unicode_escape", errors="ignore")
+        clean_desc = " ".join(raw_desc.split())[:2500]
+        if clean_desc:
+          blocks.append(f"=== VIDEO DESCRIPTION ===\n{clean_desc}")
+      # Extract captionTracks baseUrl if present
+      m_cap = re.search(r'"captionTracks":\[\{"baseUrl":"([^"]+)"', html_txt)
+      if m_cap:
+        cap_url = m_cap.group(1).replace("\\u0026", "&")
+        with urllib.request.urlopen(urllib.request.Request(cap_url, headers={"User-Agent": "Mozilla/5.0"}), timeout=5) as c_resp:
+          cap_xml = c_resp.read().decode("utf-8", errors="ignore")
+        c_root = ET.fromstring(cap_xml)
+        cap_lines = [ (el.text or "").strip() for el in c_root.findall(".//text") if el.text ]
+        if cap_lines:
+          joined_caps = " ".join(cap_lines)[:9000]
+          blocks.append(f"=== LIVE YOUTUBE CAPTIONS / TRANSCRIPT ===\n{joined_caps}")
     except Exception:
-      continue
-  if not videos:
-    videos = [
-      {"date": "2026-11-14", "title": "Stock Market Warning | My QQQ Hedge + 5 Stocks I'm Looking To Add (ABBV, AXP, MSFT, AAPL, ZM, SPG, NVDA)", "link": "https://www.youtube.com/watch?v=8YeWNhktU1c"},
-      {"date": "2026-11-12", "title": "AI Stocks Rallying | More Upside Ahead? VXN Study + My TQQQ Update", "link": "https://www.youtube.com/watch?v=vdhKw6ywg1Y"},
-      {"date": "2026-11-10", "title": "Stock Market Rally Starting? NVDA News + My $100K+ TQQQ Position", "link": "https://www.youtube.com/watch?v=bZgg7-4I1pI"},
-      {"date": "2026-11-05", "title": "Is The AI Trade Over? Midterm Election Data + My $50k LEAPS Buy", "link": "https://www.youtube.com/watch?v=601dK1SfH9Y"}
-    ]
-  return videos
+      pass
+  if not blocks:
+    blocks.append(f"Video Title: {fallback_title} ({video_url}) — Analyze the core macro/stock thesis implied by this topic against our live candlestick and options data.")
+  return "\n\n".join(blocks)
+
+def _scrape_youtube_channel_videos(handle_or_url, max_vids=6):
+  out = []
+  try:
+    url = handle_or_url if handle_or_url.startswith("http") else f"https://www.youtube.com/{handle_or_url}/videos"
+    req = urllib.request.Request(
+      url,
+      headers={
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "Accept-Language": "zh-HK,zh-TW;q=0.9,en-US;q=0.8,en;q=0.7"
+      }
+    )
+    with urllib.request.urlopen(req, timeout=5) as resp:
+      html_s = resp.read().decode("utf-8", errors="ignore")
+    # Try channel_id RSS feed first if we find externalId
+    m_cid = re.search(r'"externalId":"(UC[A-Za-z0-9_-]{22})"', html_s)
+    if m_cid:
+      cid = m_cid.group(1)
+      rss_u = f"https://www.youtube.com/feeds/videos.xml?channel_id={cid}"
+      with urllib.request.urlopen(urllib.request.Request(rss_u, headers={"User-Agent": "Mozilla/5.0"}), timeout=4.5) as r_resp:
+        root = ET.fromstring(r_resp.read())
+      ns = {"atom": "http://www.w3.org/2005/Atom"}
+      for ent in root.findall("atom:entry", ns)[:max_vids]:
+        t_el = ent.find("atom:title", ns)
+        l_el = ent.find("atom:link", ns)
+        p_el = ent.find("atom:published", ns)
+        if t_el is not None and t_el.text:
+          lnk = l_el.attrib.get("href", "") if l_el is not None else ""
+          vid_id = _extract_yt_video_id(lnk)
+          out.append({
+            "id": vid_id,
+            "title": t_el.text.strip(),
+            "link": lnk,
+            "date": p_el.text[:10] if p_el is not None and p_el.text else "Recent"
+          })
+  except Exception:
+    pass
+  return out
+
+@st.cache_data(ttl=900, show_spinner=False)
+def fetch_ryan_latest_videos():
+  curated = [
+    {"id": "8YeWNhktU1c", "date": "2026-11-14", "title": "Stock Market Warning | My QQQ Hedge + 5 Stocks I'm Looking To Add (ABBV, AXP, MSFT, AAPL, ZM, SPG, NVDA)", "link": "https://www.youtube.com/watch?v=8YeWNhktU1c"},
+    {"id": "vdhKw6ywg1Y", "date": "2026-11-12", "title": "AI Stocks Rallying | More Upside Ahead? VXN Study + My TQQQ Update (Options With Ryan)", "link": "https://www.youtube.com/watch?v=vdhKw6ywg1Y"},
+    {"id": "bZgg7-4I1pI", "date": "2026-11-10", "title": "Stock Market Rally Starting? NVDA News + My $100K+ TQQQ Position (Options With Ryan)", "link": "https://www.youtube.com/watch?v=bZgg7-4I1pI"},
+    {"id": "601dK1SfH9Y", "date": "2026-11-05", "title": "Is The AI Trade Over? Midterm Election Data + My $50k LEAPS Buy (Options With Ryan)", "link": "https://www.youtube.com/watch?v=601dK1SfH9Y"}
+  ]
+  live_vids = _scrape_youtube_channel_videos("@OptionsWithRyan", max_vids=6)
+  merged = []
+  seen_ids = set()
+  for v in (live_vids + curated):
+    vid = v.get("id") or _extract_yt_video_id(v.get("link", ""))
+    if vid and vid not in seen_ids:
+      seen_ids.add(vid)
+      v["id"] = vid
+      merged.append(v)
+  return sorted(merged, key=lambda x: str(x.get("date", "")), reverse=True)[:6]
 
 def render_options_cockpit_tab():
   st.markdown("<h1>Options Cockpit: LEAPS (85–90Δ) & Tactical Short-Term Bets</h1>", unsafe_allow_html=True)
@@ -2451,12 +2629,18 @@ def render_options_cockpit_tab():
     else:
       st.caption("No historical option ledger entries recorded yet.")
 
-@st.cache_data(ttl=1800, show_spinner=False)
+@st.cache_data(ttl=900, show_spinner=False)
 def fetch_sds_latest_videos():
-  videos = []
+  curated_sds = [
+    {"id": "14NkjY9NbKI", "date": "2026-11-15", "title": "【突發】黃仁勳出軌辭職只是金蟬脫殼？一場借刀殺人的美股葬禮？美股100%必漲神話徹底破滅！背後到底誰在做局？連巴菲特也進了屠宰場？", "link": "https://www.youtube.com/watch?v=14NkjY9NbKI"},
+    {"id": "u7XIeJEMuuI", "date": "2026-11-08", "title": "【突發】AI股災金融危機，台灣經濟將失去30年？經濟越差越賺錢的行業？AI是怎麼綁架亞洲經濟，這次沒有局外人？誰正在為此付出代價？", "link": "https://www.youtube.com/watch?v=u7XIeJEMuuI"},
+    {"id": "wdRng1DAh5c", "date": "2026-11-01", "title": "【突發】廣場協議毀了日本，又將摧毀中國？不想陪葬就趕快逃生？人民幣暴漲是一場騙局？中國3兆美元被餓狼盯上，經濟將失去30年？", "link": "https://www.youtube.com/watch?v=wdRng1DAh5c"},
+    {"id": "XdN4xVmSNJ0", "date": "2026-10-18", "title": "23-Hour US Trading & Stablecoin (USDT/USDC) Liquidity Siphon from Asian Markets", "link": "https://www.youtube.com/watch?v=XdN4xVmSNJ0"},
+    {"id": "QzZPB7CLibw", "date": "2026-08-16", "title": "Eurozone Crisis 2.0: Why Global Capital Is Fleeing Europe into US Treasuries & US Tech", "link": "https://www.youtube.com/watch?v=QzZPB7CLibw"}
+  ]
+  live_videos = []
   rss_urls = [
-    "https://www.youtube.com/feeds/videos.xml?channel_id=UCf2d3_2b7236-m62N-P4c3Q",
-    "https://news.google.com/rss/search?q=%2290%E5%BE%8C%E5%89%B5%E6%A5%AD%E5%AE%B6%E6%8E%83%E5%9C%B0%E5%83%A7%22+site:youtube.com&hl=zh-HK&gl=HK&ceid=HK:zh-Hant"
+    "https://www.youtube.com/feeds/videos.xml?channel_id=UCWMxmoBhchU3swFAciqagnw"
   ]
   for u in rss_urls:
     try:
@@ -2465,29 +2649,33 @@ def fetch_sds_latest_videos():
         raw_xml = resp.read()
       root = ET.fromstring(raw_xml)
       ns = {"atom": "http://www.w3.org/2005/Atom", "yt": "http://www.youtube.com/xml/schemas/2015"}
-      entries = root.findall("atom:entry", ns)
-      for ent in entries[:8]:
+      for ent in root.findall("atom:entry", ns)[:8]:
         t_el = ent.find("atom:title", ns)
         l_el = ent.find("atom:link", ns)
         p_el = ent.find("atom:published", ns)
         if t_el is not None and t_el.text:
-          videos.append({
+          lnk = l_el.attrib.get("href", "https://www.youtube.com/@sds.getrich") if l_el is not None else "https://www.youtube.com/@sds.getrich"
+          live_videos.append({
+            "id": _extract_yt_video_id(lnk),
             "title": t_el.text.strip(),
-            "link": l_el.attrib.get("href", "https://www.youtube.com/@sds.getrich") if l_el is not None else "https://www.youtube.com/@sds.getrich",
+            "link": lnk,
             "date": p_el.text[:10] if p_el is not None and p_el.text else "Recent"
           })
-      if videos:
+      if live_videos:
         break
     except Exception:
       continue
-  if not videos:
-    videos = [
-      {"date": "2026-10-18", "title": "23-Hour US Trading & Stablecoin (USDT/USDC) Liquidity Siphon from Asian Markets", "link": "https://www.youtube.com/watch?v=XdN4xVmSNJ0"},
-      {"date": "2026-08-16", "title": "Eurozone Crisis 2.0: Why Global Capital Is Fleeing Europe into US Treasuries & US Tech", "link": "https://www.youtube.com/watch?v=QzZPB7CLibw"},
-      {"date": "2026-07-12", "title": "AI Debt & Private Credit Bubble: CoreWeave, Oracle & How to Ride the Wave with Trailing Stops", "link": "https://www.youtube.com/watch?v=Jod__0savaQ"},
-      {"date": "2026-05-24", "title": "US Treasury Volatility & The Post-2008 Equity Melt-Up Playbook", "link": "https://www.youtube.com/watch?v=sJ-sz-QNbXc"}
-    ]
-  return videos
+  if not live_videos:
+    live_videos = _scrape_youtube_channel_videos("@sds.getrich", max_vids=6)
+  merged = []
+  seen_ids = set()
+  for v in (live_videos + curated_sds):
+    vid = v.get("id") or _extract_yt_video_id(v.get("link", ""))
+    if vid and vid not in seen_ids:
+      seen_ids.add(vid)
+      v["id"] = vid
+      merged.append(v)
+  return sorted(merged, key=lambda x: str(x.get("date", "")), reverse=True)[:6]
 
 def get_gemini_api_key():
   try:
@@ -2837,6 +3025,62 @@ def query_gemini_copilot(user_prompt, chat_history, portfolio_context, model_pre
 
 REPORT_CACHE_FILE = f"strategist_report{USER_SUFFIX}.json"
 
+def build_video_anticipation_prompt(channel_tag, video_obj):
+  v_url = video_obj.get("link", "")
+  v_title = video_obj.get("title", "")
+  v_date = video_obj.get("date", "")
+  vid_transcript_ctx = fetch_youtube_video_transcript_and_context(v_url, fallback_title=v_title)
+
+  all_tks = get_all_monitored_tickers()
+  extra_tks = [
+    "NVDA", "TSLA", "GOOGL", "MSFT", "AAPL", "AMD", "MU", "INTC", "AVGO", "TSM",
+    "VRT", "COHR", "LITE", "CRDO", "PLTR", "APP", "ABBV", "AXP", "LLY", "JPM",
+    "COST", "WMT", "TJX", "SPG", "ZM", "EWJ", "EWY", "FXI", "VGK", "USO", "GLD", "SLV", "TLT"
+  ]
+  combined_tks = list(dict.fromkeys(all_tks + extra_tks))[:45]
+  snap = fetch_batch_market_data(combined_tks, account_size=settings["account_size"])
+  t_lines = []
+  for sym_k in combined_tks:
+    if sym_k not in snap:
+      continue
+    r = snap[sym_k]
+    t_lines.append(
+      f"{sym_k}: Close=${r['Price']:.2f} ({r['Change_Pct']:+.2f}%), Playbook={r['TCT_Model']}, Action={r['TCT_Action']}, "
+      f"Trigger=${r['BOS_Level']:.2f}, Target=${r['Target_Price']:.2f}, Stop=${r['Stop_Price']:.2f}, "
+      f"Pot_RR={r.get('Potential_RR', r['R_Multiple']):.2f}R, EMA20=${r['EMA20_Val']:.2f}, EMA50=${r['EMA50_Val']:.2f}, "
+      f"SMA150=${r['SMA150_Val']:.2f}, RSI14={r['RSI']:.1f}, Paced_RVOL={r['Paced_RVOL']:.2f}x"
+    )
+
+  if "ryan" in channel_tag.lower():
+    instructions = (
+      f"Write a comprehensive 【@OptionsWithRyan Video Audit & Options Strategy Report: {v_date} — {v_title}】 in clear, authoritative English.\n"
+      "Core Mandate: The user does NOT like selling naked/cash-secured puts in volatile markets (which caps upside while taking 100% crash risk). "
+      "Instead, use Ryan's video purely for stock idea discovery and audit every stock he mentions against our 8-Playbook daily candlestick engine and our two preferred options strategies:\n"
+      "  (A) Long Investment LEAPS Calls (>9 Months Out, 0.85–0.90 Delta) on confirmed Stage 2 leaders, and\n"
+      "  (B) Short-Term Single-Leg Tactical Bets (1–6 Weeks Out, 0.40–0.65 Delta) for 'Premium Flush' Call rebounds near 20/50-EMA support or Bearish Breakdown Puts below the 50/150-MA.\n"
+      "Structure your report into 4 sections:\n"
+      "1. **Executive Summary of Ryan's Video & Macro/Volatility Stance**: Summarize the key macro points, VIX/VXN readings, hedges, and every stock/option trade Ryan pitched in this video.\n"
+      "2. **Stock-by-Stock Candlestick & Valuation Audit**: Cross-check each stock Ryan mentioned against our live daily candlestick data (Price vs. 20-EMA, 50-EMA, 150-SMA, RVOL, Playbook signal). Separate true Stage 2 institutional leaders from dangerous knife-catching or overextended value traps.\n"
+      "3. **Superior Options Execution (0.85–0.90Δ LEAPS Calls & Short-Term Tactical Bets vs. Selling Puts)**: For the best stocks from his list (plus top watchlist overlaps), specify whether to buy a >9M `0.85–0.90Δ LEAPS Call`, a `Short-Term Premium-Flush Call`, or a `Short-Term Breakdown Put`.\n"
+      "4. **Exact Trade Tickets**: Provide exact Underlying Buy Trigger, Stop-Loss, Profit Target, and Potential R/R for the top setups."
+    )
+  else:
+    instructions = (
+      f"Write a comprehensive 【@sds.getrich (Sweeping Monk) Video Synthesis, Critique & Forward Anticipation Report: {v_date} — {v_title}】 in clear, authoritative English.\n"
+      "Core Mandate: Stock picking is about ANTICIPATION, not repeating headlines. Treat @sds.getrich as one insightful macro perspective—extract his best structural insights, critically challenge any over-dramatic or one-sided claims, and translate the second- and third-order consequences into concrete stock and options plays across all 11 sectors.\n"
+      "Structure your report into 4 sections:\n"
+      "1. **Executive Summary of the Video's Core Thesis**: Clearly explain the key arguments, hidden mechanisms, and macro/political/credit chain reactions presented in this video.\n"
+      "2. **Independent Strategist Critique (Where We Agree vs. Where We Disagree)**: Separate the high-signal structural truths (e.g., data-center power/permitting bottlenecks, hyperscaler FCF strain, Asian currency/import inflation) from dramatic hyperbole, cross-checking against real market data.\n"
+      "3. **Second- & Third-Order Forward Anticipation (What to Buy & What to Avoid Across All Sectors)**: Trace where capital, pricing power, and orders will rotate over the next 3–6 months as a result of these forces (including existing data-center efficiency/optical upgrades, zero-capex cash cows, healthcare, financials, defense, and trade-down retail, while flagging vulnerable stocks/ETFs).\n"
+      "4. **Chart-Confirmed Stock & Options Game Plan (LEAPS 85–90Δ & Short-Term Tactical Bets)**: Cross-check these anticipated winners and losers against our live candlestick data (20-EMA, 50-EMA, 150-SMA) and output exact Buy Triggers, Stop-Losses, Profit Targets, and Options strategy recommendations."
+    )
+
+  return (
+    f"{instructions}\n\n"
+    f"{vid_transcript_ctx}\n\n"
+    f"=== LIVE CANDLESTICK & 8-PLAYBOOK TECHNICAL DATA ===\n" + "\n".join(t_lines)
+  )
+
 def render_ai_copilot_tab():
   st.markdown("<h1>AI Macro & Chief Strategist Cockpit</h1>", unsafe_allow_html=True)
   st.markdown(
@@ -2861,9 +3105,9 @@ def render_ai_copilot_tab():
       st.session_state["strategist_report"] = saved_rep.get("body", "")
       st.session_state["strategist_report_title"] = saved_rep.get("title", "Daily Chief Strategist Report")
 
-  # --- TOP CONTROL BAR: MODEL SELECTOR, REPORT GENERATORS & GMAIL AUTO-DELIVERY ---
-  st.markdown("### 1. Full-Width Daily Chief Strategist Report (English · Global Anticipation & Chart Audit)")
-  ctl1, ctl2, ctl3, ctl4 = st.columns([1.5, 1.0, 1.35, 1.35])
+  # --- TOP CONTROL BAR: MODEL SELECTOR & 4 FULL-WIDTH REPORT GENERATORS ---
+  st.markdown("### 1. Full-Width Chief Strategist & Video Anticipation Reports (English)")
+  ctl1, ctl2 = st.columns([1.6, 1.0])
   model_choice = ctl1.selectbox(
     "AI Model Engine",
     [
@@ -2890,12 +3134,19 @@ def render_ai_copilot_tab():
       "LOW": "Low Thinking (Fast)"
     }[x]
   )
-  run_main_btn = ctl3.button("Generate 06:15 AM Global Anticipation Report", type="primary", use_container_width=True)
-  run_supp_btn = ctl4.button("Generate 09:15 AM Stocktwits & ARK Audit", type="primary", use_container_width=True)
+
+  btn_r1, btn_r2, btn_r3, btn_r4 = st.columns(4)
+  run_main_btn = btn_r1.button("1. Run 06:15 AM Global Anticipation", type="primary", use_container_width=True)
+  run_supp_btn = btn_r2.button("2. Run 09:15 AM Stocktwits & ARK Audit", type="primary", use_container_width=True)
+  run_sds_latest_btn = btn_r3.button("3. Anticipate Latest @sds.getrich Video", type="primary", use_container_width=True)
+  run_ryan_latest_btn = btn_r4.button("4. Audit @OptionsWithRyan Latest Picks", type="primary", use_container_width=True)
 
   pos_summary = []
   for p in positions:
     pos_summary.append(f"{p['Ticker']}: {p['Shares']} shs @ ${p['BuyPrice']:.2f}, Stop ${p['StopLoss']:.2f}, +15% Target ${p['Target15']:.2f}, Remarks: {p.get('Remarks', '')}")
+  opt_pos_summary = []
+  for op in options_positions:
+    opt_pos_summary.append(f"{op['Ticker']} {op['Expiration']} ${op['Strike']:g} {op['Option_Type']} ({op.get('Contracts',1)}x @ ${op.get('Buy_Premium',0):.2f}, OptStop ${op.get('Option_Stop',0):.2f}, StockStop ${op.get('Stock_Stop',0):.2f})")
   monitored_tks = get_all_monitored_tickers()[:35]
   live_snap = fetch_batch_market_data(monitored_tks, account_size=settings["account_size"])
   tech_lines = []
@@ -2908,34 +3159,54 @@ def render_ai_copilot_tab():
       f"SMA150=${rec_v['SMA150_Val']:.2f}, EMA20=${rec_v['EMA20_Val']:.2f}, RSI={rec_v['RSI']:.1f}, RS_vs_SPY={rec_v['RS_Diff']:+.1f}%"
     )
   port_ctx = (
-    "OPEN POSITIONS:\n" + ("\n".join(pos_summary) if pos_summary else "None open.") +
+    "OPEN STOCK POSITIONS:\n" + ("\n".join(pos_summary) if pos_summary else "None open.") +
+    "\n\nOPEN OPTIONS POSITIONS:\n" + ("\n".join(opt_pos_summary) if opt_pos_summary else "None open.") +
     "\n\nWATCHLIST LIVE TECHNICALS:\n" + ("\n".join(tech_lines) if tech_lines else "No watchlist data loaded.")
   )
 
-  if run_main_btn or run_supp_btn:
-    r_mode = "0615_MAIN" if run_main_btn else "0915_SUPPLEMENT"
-    r_title = (
-      f"06:15 AM Global Anticipation & Cross-Sector Report ({datetime.now().strftime('%Y-%m-%d %H:%M')})"
-      if run_main_btn else
-      f"09:15 AM Stocktwits & ARK Institutional Audit ({datetime.now().strftime('%Y-%m-%d %H:%M')})"
-    )
-    with st.spinner("Running High-Thinking Global Anticipation & Candlestick Cross-Verification..."):
-      full_p = build_second_order_strategist_prompt(report_mode=r_mode)
+  def _execute_and_open_full_width(prompt_text, report_heading):
+    with st.spinner(f"Running High-Thinking Analysis: {report_heading}..."):
       generated_rep = query_gemini_copilot(
-        full_p,
+        prompt_text,
         [],
         port_ctx,
         model_pref=model_choice,
         thinking_level=thinking_choice
       )
       st.session_state["strategist_report"] = generated_rep
-      st.session_state["strategist_report_title"] = r_title
-      save_json(REPORT_CACHE_FILE, {"title": r_title, "body": generated_rep})
+      st.session_state["strategist_report_title"] = report_heading
+      save_json(REPORT_CACHE_FILE, {"title": report_heading, "body": generated_rep})
+      st.session_state.chat_messages.append({"role": "assistant", "content": f"**{report_heading}**\n\n{generated_rep}"})
       if settings.get("auto_email_report", False):
-        ok_auto, msg_auto = send_strategist_email_report(r_title, generated_rep)
+        ok_auto, msg_auto = send_strategist_email_report(report_heading, generated_rep)
         if ok_auto:
           st.toast(f"Auto-emailed report: {msg_auto}")
       st.rerun()
+
+  if run_main_btn:
+    _execute_and_open_full_width(
+      build_second_order_strategist_prompt(report_mode="0615_MAIN"),
+      f"06:15 AM Global Anticipation & Cross-Sector Report ({datetime.now().strftime('%Y-%m-%d %H:%M')})"
+    )
+  if run_supp_btn:
+    _execute_and_open_full_width(
+      build_second_order_strategist_prompt(report_mode="0915_SUPPLEMENT"),
+      f"09:15 AM Stocktwits & ARK Institutional Audit ({datetime.now().strftime('%Y-%m-%d %H:%M')})"
+    )
+  if run_sds_latest_btn:
+    sds_list = fetch_sds_latest_videos()
+    latest_sds = sds_list[0]
+    _execute_and_open_full_width(
+      build_video_anticipation_prompt("sds", latest_sds),
+      f"@sds.getrich Forward Anticipation ({latest_sds['date']}): {latest_sds['title'][:55]}..."
+    )
+  if run_ryan_latest_btn:
+    ryan_list = fetch_ryan_latest_videos()
+    latest_ryan = ryan_list[0]
+    _execute_and_open_full_width(
+      build_video_anticipation_prompt("ryan", latest_ryan),
+      f"@OptionsWithRyan Stock & Options Audit ({latest_ryan['date']}): {latest_ryan['title'][:55]}..."
+    )
 
   # --- FULL-WIDTH EDITORIAL READER FOR THE CHIEF STRATEGIST REPORT ---
   if st.session_state.get("strategist_report"):
@@ -2981,14 +3252,14 @@ def render_ai_copilot_tab():
     st.markdown(
       "**How This Dual Setup Works:**\n"
       "1. **In the Gemini App (Argon High):** Copy the two clean prompts below into **Gemini ➔ Scheduled Actions** (or send them directly in Gemini chat). Because they contain dynamic instructions rather than frozen prices, Argon High will pull fresh market data and your latest `ling.angels@gmail.com` emails every single morning (including weekend Stocktwits editions).\n"
-      "2. **In This Dashboard (`stock.py`):** Click either button above to run the live 50-ticker candlestick cross-verification in full-width view, and optionally add a 16-character Google **App Password** below so the dashboard can email the report directly to `ling.angels@gmail.com`."
+      "2. **In This Dashboard (`stock.py`):** Click any of the 4 buttons above to run the live 50-ticker candlestick cross-verification in full-width view, and optionally add a 16-character Google **App Password** below (`https://myaccount.google.com/apppasswords`) so the dashboard can email the report directly to `ling.angels@gmail.com`."
     )
     st.markdown("**Schedule 1 — 06:15 AM HKT Daily Global Anticipation & Cross-Sector Prompt:**")
     st.code(SCHEDULE_PROMPT_0615, language="text")
     st.markdown("**Schedule 2 — 09:15 AM HKT Daily Stocktwits & ARK Newsletter Audit Prompt:**")
     st.code(SCHEDULE_PROMPT_0915, language="text")
     st.markdown("---")
-    st.markdown("**Optional: Direct Gmail IMAP/SMTP Auto-Email Settings (For Dashboard Email Delivery)**")
+    st.markdown("**Optional: Direct Gmail IMAP/SMTP Auto-Email Settings (Generate 16-Char Code at `https://myaccount.google.com/apppasswords`)**")
     em_c1, em_c2, em_c3 = st.columns([1.4, 1.4, 1.2])
     g_usr = em_c1.text_input("Gmail Address", value=str(settings.get("gmail_user", "ling.angels@gmail.com")), key="cfg_g_usr")
     g_app_pw = em_c2.text_input("Gmail 16-Char App Password", value=str(settings.get("gmail_app_password", "")), type="password", placeholder="xxxx xxxx xxxx xxxx", key="cfg_g_pw")
@@ -3002,70 +3273,96 @@ def render_ai_copilot_tab():
       st.success("Saved Gmail delivery settings!")
 
   st.markdown("---")
-  col_macro, col_chat = st.columns([1.05, 1.45])
+  col_macro, col_chat = st.columns([1.15, 1.35])
   with col_macro:
-    st.subheader("Macro & Options Reference Feeds")
-    feed_tab_sds, feed_tab_ryan = st.tabs(["@sds.getrich (Macro)", "@OptionsWithRyan (Picks Audit)"])
+    st.subheader("Video Insights & Forward Anticipation Engine")
+    feed_tab_sds, feed_tab_ryan = st.tabs(["@sds.getrich (Macro & Anticipation)", "@OptionsWithRyan (Picks & LEAPS Audit)"])
+
     with feed_tab_sds:
-      st.caption("External macro commentary—always cross-check against global macro data and chart structure.")
-      if st.button("Refresh @sds.getrich Feed", use_container_width=True, key="ref_sds_btn"):
+      st.caption("Select any @sds.getrich video below to read the instant English Executive Summary & Second-Order Anticipation, or click the primary button to run a live 50-stock candlestick cross-audit in the Top Full-Width Reader.")
+      if st.button("Refresh @sds.getrich Video Feed", use_container_width=True, key="ref_sds_btn"):
         fetch_sds_latest_videos.clear()
+        fetch_youtube_video_transcript_and_context.clear()
+        st.toast("Refreshed @sds.getrich video feed!")
         st.rerun()
       vids = fetch_sds_latest_videos()
-      for v in vids[:5]:
-        st.markdown(
-          f'<div style="background:white;border:1px solid #e7e2d9;border-radius:8px;padding:8px 12px;margin-bottom:6px;font-size:0.84rem;">'
-          f'<span class="age-badge" style="margin-left:0;margin-right:6px;">{v["date"]}</span>'
-          f'<a href="{v["link"]}" target="_blank" style="color:#0f291e;font-weight:700;text-decoration:none;">{v["title"]}</a></div>',
-          unsafe_allow_html=True
-        )
+      sel_sds_v = st.selectbox(
+        "Select @sds.getrich Video",
+        vids,
+        index=0,
+        format_func=lambda v: f"[{v['date']}] {v['title']}",
+        key="sel_sds_video_box"
+      )
+      if sel_sds_v:
+        if st.button(f"Analyze & Anticipate Selected Video in Full-Width Reader ({sel_sds_v['date']})", type="primary", use_container_width=True, key="btn_an_sds_sel"):
+          _execute_and_open_full_width(
+            build_video_anticipation_prompt("sds", sel_sds_v),
+            f"@sds.getrich Forward Anticipation ({sel_sds_v['date']}): {sel_sds_v['title'][:55]}..."
+          )
+        vid_id_s = sel_sds_v.get("id") or _extract_yt_video_id(sel_sds_v.get("link", ""))
+        k_sds = KNOWN_VIDEO_TRANSCRIPTS.get(vid_id_s)
+        if k_sds:
+          st.markdown(
+            f'<div style="background:#ffffff;border:1px solid #cbd5e1;border-left:4px solid #0f291e;border-radius:8px;padding:12px 14px;margin-top:8px;">'
+            f'<div style="font-weight:800;color:#0f291e;font-size:0.92rem;margin-bottom:6px;">Instant Executive Breakdown ({sel_sds_v["date"]})</div>',
+            unsafe_allow_html=True
+          )
+          st.markdown(k_sds["summary_en"])
+          st.markdown("---")
+          st.markdown(k_sds["anticipation_en"])
+          st.markdown(f'<div style="font-size:0.78rem;margin-top:6px;"><a href="{sel_sds_v["link"]}" target="_blank" style="color:#64748b;">Optional: Open original YouTube video ↗</a></div></div>', unsafe_allow_html=True)
+        else:
+          st.info(f"Click **Analyze & Anticipate Selected Video in Full-Width Reader** above to extract the live transcript and generate the English forward anticipation report for `{sel_sds_v['title']}`.")
+
     with feed_tab_ryan:
-      st.caption("Use @OptionsWithRyan for stock idea discovery only—audit his picks against Stage 2 charts and 0.85–0.90Δ LEAPS Calls instead of blind put-selling.")
-      if st.button("Refresh @OptionsWithRyan Feed", use_container_width=True, key="ref_ryan_btn"):
+      st.caption("Select any @OptionsWithRyan video below to read our instant Stock & Options Audit, or click the primary button to run a live candlestick + 0.85–0.90Δ LEAPS cross-check in the Top Full-Width Reader.")
+      if st.button("Refresh @OptionsWithRyan Video Feed", use_container_width=True, key="ref_ryan_btn"):
         fetch_ryan_latest_videos.clear()
+        fetch_youtube_video_transcript_and_context.clear()
+        st.toast("Refreshed @OptionsWithRyan video feed!")
         st.rerun()
       ryan_vids = fetch_ryan_latest_videos()
-      for rv in ryan_vids[:5]:
-        st.markdown(
-          f'<div style="background:white;border:1px solid #e7e2d9;border-radius:8px;padding:8px 12px;margin-bottom:6px;font-size:0.84rem;">'
-          f'<span class="age-badge" style="margin-left:0;margin-right:6px;">{rv["date"]}</span>'
-          f'<a href="{rv["link"]}" target="_blank" style="color:#0f291e;font-weight:700;text-decoration:none;">{rv["title"]}</a></div>',
-          unsafe_allow_html=True
-        )
-    st.markdown("#### Key Macro Themes Under Watch")
-    with st.expander("1. Energy / Geopolitics Lagged Inflation & Asian/European Currency Stress", expanded=True):
-      st.write(
-        "Even when crude oil pulls back from war spikes, energy-importing economies in Asia and Europe suffer a lagged wave of sticky imported inflation, trade-balance deterioration, and currency depreciation. Monitor `EWJ`, `EWY`, `VGK`, `JPY=X`, and `EURUSD=X` for structural weakness while favoring hard-asset and pricing-power leaders."
+      sel_ryan_v = st.selectbox(
+        "Select @OptionsWithRyan Video",
+        ryan_vids,
+        index=0,
+        format_func=lambda v: f"[{v['date']}] {v['title']}",
+        key="sel_ryan_video_box"
       )
-    with st.expander("2. AI Capex & Private-Credit Debt Cycle vs. Cross-Sector Rotation", expanded=False):
-      st.write(
-        "Hyperscalers and data-center landlords face rising capital intensity and power/grid bottlenecks. Track where capital rotates across Defense (`ITA`), Industrials (`XLI`), Nuclear/Utilities (`URA`/`CEG`), Healthcare (`XLV`), and optical/networking upgrades (`COHR`/`LITE`)."
+      if sel_ryan_v:
+        if st.button(f"Audit Selected Ryan Video in Full-Width Reader ({sel_ryan_v['date']})", type="primary", use_container_width=True, key="btn_an_ryan_sel"):
+          _execute_and_open_full_width(
+            build_video_anticipation_prompt("ryan", sel_ryan_v),
+            f"@OptionsWithRyan Stock & Options Audit ({sel_ryan_v['date']}): {sel_ryan_v['title'][:55]}..."
+          )
+        vid_id_r = sel_ryan_v.get("id") or _extract_yt_video_id(sel_ryan_v.get("link", ""))
+        k_ryan = KNOWN_VIDEO_TRANSCRIPTS.get(vid_id_r)
+        if k_ryan:
+          st.markdown(
+            f'<div style="background:#ffffff;border:1px solid #cbd5e1;border-left:4px solid #c5a059;border-radius:8px;padding:12px 14px;margin-top:8px;">'
+            f'<div style="font-weight:800;color:#0f291e;font-size:0.92rem;margin-bottom:6px;">Instant Picks Audit & LEAPS Comparison ({sel_ryan_v["date"]})</div>',
+            unsafe_allow_html=True
+          )
+          st.markdown(k_ryan["summary_en"])
+          st.markdown("---")
+          st.markdown(k_ryan["anticipation_en"])
+          st.markdown(f'<div style="font-size:0.78rem;margin-top:6px;"><a href="{sel_ryan_v["link"]}" target="_blank" style="color:#64748b;">Optional: Open original YouTube video ↗</a></div></div>', unsafe_allow_html=True)
+        else:
+          st.info(f"Click **Audit Selected Ryan Video in Full-Width Reader** above to extract the live transcript and audit every stock he mentions against our 8-Playbook charts.")
+
+    st.markdown("**Quick Full-Width Strategy Audits:**")
+    qp1, qp2 = st.columns(2)
+    if qp1.button("Audit My Open Stock & Option Positions", use_container_width=True):
+      _execute_and_open_full_width(
+        "Review my current open stock and option positions, unrealized P&L, and stop-losses in English. Which positions need stop adjustments, partial profit-taking, or rotation right now?",
+        f"Open Portfolio & Options Risk Audit ({datetime.now().strftime('%Y-%m-%d %H:%M')})"
       )
-    st.markdown("**Quick Interactive Prompts:**")
-    qp1, qp2, qp3 = st.columns(3)
-    prompt_to_send = None
-    if qp1.button("Audit Open Positions", use_container_width=True):
-      prompt_to_send = "Review my current open stock and option positions, unrealized P&L, and stop-losses in English. Which positions need stop adjustments, partial profit-taking, or rotation right now?"
-    if qp2.button("Audit Ryan's Latest Picks", use_container_width=True):
-      ryan_titles = "; ".join([f"[{v['date']}] {v['title']}" for v in fetch_ryan_latest_videos()[:4]])
-      ryan_tks = ["NVDA", "ABBV", "AXP", "MSFT", "AAPL", "ZM", "SPG", "TQQQ", "QQQ", "HOOD", "CRDO", "MU", "PLTR"]
-      r_snap = fetch_batch_market_data(ryan_tks, account_size=settings["account_size"])
-      r_lines = [
-        f"{k}: Close=${v['Price']:.2f} ({v['Change_Pct']:+.2f}%), Playbook={v['TCT_Model']}, Action={v['TCT_Action']}, "
-        f"Trigger=${v['BOS_Level']:.2f}, Target=${v['Target_Price']:.2f}, Stop=${v['Stop_Price']:.2f}, "
-        f"EMA20=${v['EMA20_Val']:.2f}, EMA50=${v['EMA50_Val']:.2f}, SMA150=${v['SMA150_Val']:.2f}, RSI={v['RSI']:.1f}"
-        for k, v in r_snap.items()
-      ]
-      prompt_to_send = (
-        f"Critically audit the latest stock picks from 'Options With Ryan' ({ryan_titles}) in English. "
-        "Do NOT endorse selling puts blindly in a volatile market. Instead, evaluate each of his mentioned stocks "
-        "(including NVDA, ABBV, AXP, MSFT, AAPL, ZM, SPG, and any watchlist overlaps) against our live candlestick data below. "
-        "Tell me: (1) Which of his picks are genuine Stage 2 leaders worthy of a >9-month 0.85-0.90 Delta LEAPS Call or a Short-Term 'Premium Flush' Call on a dip; "
-        "(2) Which of his picks are dangerous value traps or overextended; and (3) Exact Buy Trigger, Stop-Loss, and Target levels.\n\n"
-        + "\n".join(r_lines)
+    if qp2.button("Global Macro & 11-Sector Anticipation", use_container_width=True):
+      _execute_and_open_full_width(
+        "Using second-order anticipation in English, analyze how current oil/inflation/currency trends in Asia and Europe and US policy shifts will impact all 11 sectors over the next 3-6 months, and which watchlist stocks have the strongest chart confirmation for 0.85-0.90 Delta LEAPS Calls or short-term tactical bets.",
+        f"Global Macro & 11-Sector Anticipation ({datetime.now().strftime('%Y-%m-%d %H:%M')})"
       )
-    if qp3.button("Macro & Sector Anticipation", use_container_width=True):
-      prompt_to_send = "Using second-order anticipation in English, analyze how current oil/inflation/currency trends in Asia and Europe and US policy shifts will impact all 11 sectors over the next 3-6 months, and which watchlist stocks have the strongest chart confirmation."
+
   with col_chat:
     st.subheader("Interactive Co-Pilot Chat")
     curr_key = get_gemini_api_key()
@@ -3076,24 +3373,24 @@ def render_ai_copilot_tab():
         save_json(SETTINGS_FILE, settings)
         st.success("API Key saved!")
         st.rerun()
-    chat_box = st.container(height=460)
+    chat_box = st.container(height=480)
     with chat_box:
       if not st.session_state.chat_messages:
-        st.info("Ask any follow-up question here, or use the two buttons at the top of the page to generate the Full-Width Daily Chief Strategist Report!")
+        st.info("Ask any follow-up question below, or click any of the 4 report buttons at the top of the page to open a Full-Width Report!")
       for m in st.session_state.chat_messages:
         with st.chat_message(m["role"]):
           st.markdown(m["content"])
-    user_q = st.chat_input("Ask about macro anticipation, sector rotation, or any stock chart...")
-    active_prompt = prompt_to_send or user_q
-    if active_prompt:
-      st.session_state.chat_messages.append({"role": "user", "content": active_prompt})
-      reply = query_gemini_copilot(
-        active_prompt,
-        st.session_state.chat_messages[:-1],
-        port_ctx,
-        model_pref=model_choice,
-        thinking_level=thinking_choice
-      )
+    user_q = st.chat_input("Ask about macro anticipation, sector rotation, or any stock/option setup...")
+    if user_q:
+      st.session_state.chat_messages.append({"role": "user", "content": user_q})
+      with st.spinner("Thinking deeply..."):
+        reply = query_gemini_copilot(
+          user_q,
+          st.session_state.chat_messages[:-1],
+          port_ctx,
+          model_pref=model_choice,
+          thinking_level=thinking_choice
+        )
       st.session_state.chat_messages.append({"role": "assistant", "content": reply})
       st.rerun()
     if st.session_state.chat_messages:
