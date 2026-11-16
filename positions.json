@@ -8,5 +8,16 @@
     "StopLoss": 9.54,
     "Target15": 12.19,
     "HalfSold": false
+  },
+  {
+    "id": "VRTX_1794845159",
+    "Ticker": "VRTX",
+    "BuyPrice": 544.0,
+    "Shares": 70,
+    "BuyDate": "2026-11-16",
+    "StopLoss": 507.0,
+    "Target15": 625.5999999999999,
+    "HalfSold": false,
+    "Remarks": "Stage 2, buy trigger, sector rotation"
   }
 ]
