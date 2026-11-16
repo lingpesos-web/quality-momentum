@@ -19,5 +19,16 @@
     "Target15": 625.5999999999999,
     "HalfSold": false,
     "Remarks": "Stage 2, buy trigger, sector rotation"
+  },
+  {
+    "id": "V_1794846715",
+    "Ticker": "V",
+    "BuyPrice": 430.0,
+    "Shares": 100,
+    "BuyDate": "2026-11-16",
+    "StopLoss": 408.0,
+    "Target15": 494.49999999999994,
+    "HalfSold": false,
+    "Remarks": "sector rotation, high interest rate, AI stocks downturn"
   }
 ]
