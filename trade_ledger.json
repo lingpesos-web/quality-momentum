@@ -63,5 +63,18 @@
     "Gain_Loss_Pct": 3.79,
     "StopLoss": 29.35,
     "Remarks": "No remarks recorded. | Closed full position"
+  },
+  {
+    "Date": "2026-11-16",
+    "Timestamp": "2026-11-16 16:06",
+    "Action": "BUY",
+    "Ticker": "VRTX",
+    "Shares": 70,
+    "BuyPrice": 544.0,
+    "SellPrice": null,
+    "Gain_Loss_USD": 0.0,
+    "Gain_Loss_Pct": 0.0,
+    "StopLoss": 507.0,
+    "Remarks": "Stage 2, buy trigger, sector rotation"
   }
 ]
