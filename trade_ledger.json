@@ -76,5 +76,18 @@
     "Gain_Loss_Pct": 0.0,
     "StopLoss": 507.0,
     "Remarks": "Stage 2, buy trigger, sector rotation"
+  },
+  {
+    "Date": "2026-11-16",
+    "Timestamp": "2026-11-16 16:31",
+    "Action": "BUY",
+    "Ticker": "V",
+    "Shares": 100,
+    "BuyPrice": 430.0,
+    "SellPrice": null,
+    "Gain_Loss_USD": 0.0,
+    "Gain_Loss_Pct": 0.0,
+    "StopLoss": 408.0,
+    "Remarks": "sector rotation, high interest rate, AI stocks downturn"
   }
 ]
