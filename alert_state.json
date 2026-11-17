@@ -1,16 +1,13 @@
 {
-  "date": "2026-11-16",
+  "date": "2026-11-17",
   "alerted": [
     "AMD_STOP",
     "APLD_STOP",
-    "APP_BUY",
     "AVGO_BUY",
-    "AVGO_STOP",
     "CBRS_STOP",
     "CLS_STOP",
     "COHR_STOP",
     "COIN_STOP",
-    "COST_BUY",
     "CRCL_STOP",
     "CRDO_STOP",
     "CRWD_STOP",
@@ -21,7 +18,6 @@
     "HOOD_STOP",
     "IONQ_STOP",
     "IREN_STOP",
-    "KO_BUY",
     "LITE_STOP",
     "LRCX_STOP",
     "MRVL_STOP",
@@ -32,9 +28,9 @@
     "OKTA_STOP",
     "PLTR_STOP",
     "QUBT_STOP",
-    "SKHY_STOP",
     "SLV_STOP",
     "SNDK_STOP",
+    "SOFI_STOP",
     "SOXL_STOP",
     "SPCX_BUY",
     "STX_STOP",
@@ -43,6 +39,7 @@
     "UGL_STOP",
     "VGK_STOP",
     "WDC_STOP",
-    "XLP_BUY"
+    "XLE_STOP",
+    "XLU_STOP"
   ]
 }
