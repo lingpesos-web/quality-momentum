@@ -89,5 +89,18 @@
     "Gain_Loss_Pct": 0.0,
     "StopLoss": 408.0,
     "Remarks": "sector rotation, high interest rate, AI stocks downturn"
+  },
+  {
+    "Date": "2026-11-18",
+    "Timestamp": "2026-11-19 14:04",
+    "Action": "BUY",
+    "Ticker": "CLS",
+    "Shares": 100,
+    "BuyPrice": 244.4,
+    "SellPrice": null,
+    "Gain_Loss_USD": 0.0,
+    "Gain_Loss_Pct": 0.0,
+    "StopLoss": 233.5,
+    "Remarks": "one day before ANT Ipo, expect money re-enter market, QQQ double bottom at 645, VIX over 25"
   }
 ]
