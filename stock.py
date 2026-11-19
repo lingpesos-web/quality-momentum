@@ -14,6 +14,7 @@ import time
 import base64
 import urllib.request
 import urllib.parse
+import urllib.error
 import xml.etree.ElementTree as ET
 import email.utils
 import imaplib
@@ -3203,7 +3204,65 @@ SCHEDULE_PROMPT_0915 = (
 )
 
 
-def query_gemini_copilot(user_prompt, chat_history, portfolio_context, model_pref="auto", thinking_level="HIGH", enable_search=True, system_override=None):
+@st.cache_data(ttl=1800, show_spinner=False)
+def _discover_available_gemini_models(api_key):
+  """Queries Gemini API /v1beta/models to find active generateContent text models for this key."""
+  if not api_key:
+    return []
+  excluded_tokens = (
+    "vision", "tts", "live", "image", "transcribe", "embedding",
+    "robotics", "omni", "decision", "nano-banana", "lyria", "veo", "aqa", "learnlm"
+  )
+  found = []
+  try:
+    list_url = f"https://generativelanguage.googleapis.com/v1beta/models?key={urllib.parse.quote(api_key)}"
+    req = urllib.request.Request(list_url, headers={"User-Agent": "Quality-Momentum-Cockpit"})
+    with urllib.request.urlopen(req, timeout=8) as resp:
+      models_data = json.loads(resp.read().decode("utf-8")).get("models", [])
+    for m_info in models_data:
+      m_name = str(m_info.get("name", "")).replace("models/", "").strip()
+      methods = m_info.get("supportedGenerationMethods", [])
+      ml = m_name.lower()
+      if "generateContent" in methods and "gemini" in ml and not any(tok in ml for tok in excluded_tokens):
+        found.append(m_name)
+  except Exception:
+    pass
+
+  def _rank_model(m_str):
+    ml = m_str.lower()
+    if ml == "gemini-4-hydrogen": return 1
+    if ml == "gemini-4-argon": return 2
+    if ml == "gemini-4-carbon": return 3
+    if ml == "gemini-3.8-flash": return 4
+    if ml == "gemini-3.6-flash": return 5
+    if ml == "gemini-3.1-pro-preview": return 6
+    if ml == "gemini-3.5-flash-lite": return 7
+    if ml == "gemini-3-flash-preview": return 8
+    if ml == "gemini-3.1-flash-lite": return 9
+    if ml.startswith("gemini-4"): return 10
+    if ml.startswith("gemini-3."): return 15
+    if ml == "gemini-2.5-pro": return 25
+    if ml == "gemini-2.5-flash": return 26
+    if "lite" in ml: return 40
+    return 50
+
+  return sorted(list(dict.fromkeys(found)), key=_rank_model)
+
+
+def _format_http_err(exc):
+  if isinstance(exc, urllib.error.HTTPError):
+    body = ""
+    try:
+      raw_b = exc.read().decode("utf-8", errors="ignore")
+      parsed = json.loads(raw_b)
+      body = parsed.get("error", {}).get("message", raw_b[:140])
+    except Exception:
+      body = str(exc.reason)
+    return f"HTTP {exc.code}: {str(body)[:140]}"
+  return str(exc)[:140]
+
+
+def query_gemini_copilot(user_prompt, chat_history, portfolio_context, model_pref="auto", thinking_level="MEDIUM", enable_search=True, system_override=None):
   api_key = get_gemini_api_key()
   if not api_key:
     return "Please enter your **Gemini API Key** in Settings or the AI Co-Pilot tab (or set `GEMINI_API_KEY` in Streamlit Secrets) to enable live chat."
@@ -3218,22 +3277,35 @@ def query_gemini_copilot(user_prompt, chat_history, portfolio_context, model_pre
     f"LIVE DASHBOARD & TECHNICAL CONTEXT:\n{portfolio_context}"
   )
 
-  default_models = [
-    "gemini-2.5-flash",
-    "gemini-2.5-pro",
+  discovered = _discover_available_gemini_models(api_key)
+  verified_active_defaults = [
+    "gemini-4-hydrogen",
+    "gemini-4-argon",
+    "gemini-3.8-flash",
+    "gemini-4-carbon",
+    "gemini-3.5-flash-lite",
     "gemini-3.1-pro-preview",
-    "gemini-2.0-flash"
+    "gemini-2.5-flash",
+    "gemini-2.5-pro"
   ]
-  if model_pref and model_pref != "auto":
-    candidate_models = list(dict.fromkeys([model_pref] + default_models))
-  else:
-    candidate_models = ["gemini-2.5-pro", "gemini-2.5-flash", "gemini-3.1-pro-preview", "gemini-2.0-flash"]
 
+  if model_pref and model_pref != "auto":
+    # Try user's exact selection first, then discovered models available to their key, then active defaults
+    candidate_models = list(dict.fromkeys([model_pref] + discovered + verified_active_defaults))
+  else:
+    candidate_models = list(dict.fromkeys(discovered + verified_active_defaults))
+
+  # Cap attempts to top 6 distinct candidates so UI stays snappy
+  candidate_models = candidate_models[:6]
+  lvl_upper = str(thinking_level or "MEDIUM").upper()
+  if lvl_upper not in ("LOW", "MEDIUM", "HIGH"):
+    lvl_upper = "MEDIUM"
   budget_map = {"HIGH": 4096, "MEDIUM": 1536, "LOW": 256}
-  t_budget = budget_map.get(thinking_level, 2048)
+  t_budget = budget_map.get(lvl_upper, 1536)
+
+  errors_log = []
 
   # --- PRIMARY PATH: OFFICIAL google-genai SDK WITH NATIVE GOOGLE SEARCH GROUNDING ---
-  last_err = ""
   if HAS_GOOGLE_GENAI:
     try:
       client = genai.Client(api_key=api_key)
@@ -3246,25 +3318,38 @@ def query_gemini_copilot(user_prompt, chat_history, portfolio_context, model_pre
       search_tools = [genai_types.Tool(google_search=genai_types.GoogleSearch())] if enable_search else None
 
       for model_name in candidate_models:
+        ml = model_name.lower()
         cfg_variants = []
-        if any(k in model_name.lower() for k in ("2.5", "3.")):
+        if any(k in ml for k in ("gemini-4", "gemini-3")):
           try:
-            cfg_variants.append(genai_types.GenerateContentConfig(
+            cfg_variants.append((True, genai_types.GenerateContentConfig(
+              system_instruction=sys_text,
+              temperature=0.35,
+              max_output_tokens=8192,
+              tools=search_tools,
+              thinking_config=genai_types.ThinkingConfig(thinking_level=lvl_upper)
+            )))
+          except Exception:
+            pass
+        elif "2.5" in ml:
+          try:
+            cfg_variants.append((True, genai_types.GenerateContentConfig(
               system_instruction=sys_text,
               temperature=0.35,
               max_output_tokens=8192,
               tools=search_tools,
               thinking_config=genai_types.ThinkingConfig(thinking_budget=t_budget)
-            ))
+            )))
           except Exception:
             pass
-        cfg_variants.append(genai_types.GenerateContentConfig(
+        cfg_variants.append((True, genai_types.GenerateContentConfig(
           system_instruction=sys_text,
           temperature=0.35,
           max_output_tokens=8192,
           tools=search_tools
-        ))
-        for cfg in cfg_variants:
+        )))
+
+        for used_search, cfg in cfg_variants:
           try:
             resp = client.models.generate_content(
               model=model_name,
@@ -3281,8 +3366,7 @@ def query_gemini_copilot(user_prompt, chat_history, portfolio_context, model_pre
             try:
               gm = resp.candidates[0].grounding_metadata
               if gm and getattr(gm, "grounding_chunks", None):
-                links = []
-                seen_u = set()
+                links, seen_u = [], set()
                 for ch in gm.grounding_chunks:
                   web = getattr(ch, "web", None)
                   if web and getattr(web, "uri", None) and web.uri not in seen_u:
@@ -3293,13 +3377,15 @@ def query_gemini_copilot(user_prompt, chat_history, portfolio_context, model_pre
                   sources_md = "\n\n**Web Sources:** " + " | ".join(links[:6])
             except Exception:
               pass
-            g_tag = "Google Search: ON" if enable_search else "Google Search: OFF"
-            return f"{final_text}{sources_md}\n\n---\n*Engine: `{model_name}` (google-genai SDK) | {g_tag} | Thinking: {thinking_level}*"
+            g_tag = "Google Search: ON" if (enable_search and used_search) else "Google Search: OFF"
+            return f"{final_text}{sources_md}\n\n---\n*Engine: `{model_name}` (google-genai SDK) | {g_tag} | Thinking: {lvl_upper}*"
           except Exception as e:
-            last_err = str(e)
+            errors_log.append(f"SDK/{model_name}: {str(e)[:110]}")
+            if "404" in str(e) or "NOT_FOUND" in str(e).upper():
+              break
             continue
     except Exception as e:
-      last_err = str(e)
+      errors_log.append(f"SDK init: {str(e)[:110]}")
 
   # --- FALLBACK PATH: DIRECT REST API WITH NATIVE GOOGLE SEARCH GROUNDING ---
   rest_contents = []
@@ -3309,46 +3395,65 @@ def query_gemini_copilot(user_prompt, chat_history, portfolio_context, model_pre
   rest_contents.append({"role": "user", "parts": [{"text": user_prompt}]})
 
   for model_name in candidate_models:
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={api_key}"
-    payload = {
-      "systemInstruction": {"parts": [{"text": sys_text}]},
-      "contents": rest_contents,
-      "generationConfig": {"temperature": 0.35, "maxOutputTokens": 8192}
-    }
+    ml = model_name.lower()
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{urllib.parse.quote(model_name)}:generateContent?key={urllib.parse.quote(api_key)}"
+    gen_variants = []
+    if any(k in ml for k in ("gemini-4", "gemini-3")):
+      gen_variants.append((True, {"temperature": 0.35, "maxOutputTokens": 8192, "thinkingConfig": {"thinkingLevel": lvl_upper}}))
+    elif "2.5" in ml:
+      gen_variants.append((True, {"temperature": 0.35, "maxOutputTokens": 8192, "thinkingConfig": {"thinkingBudget": t_budget}}))
+    gen_variants.append((True, {"temperature": 0.35, "maxOutputTokens": 8192}))
     if enable_search:
-      payload["tools"] = [{"google_search": {}}]
-    try:
-      req = urllib.request.Request(
-        url,
-        data=json.dumps(payload).encode("utf-8"),
-        headers={"Content-Type": "application/json"},
-        method="POST"
-      )
-      with urllib.request.urlopen(req, timeout=55) as resp:
-        res_json = json.loads(resp.read().decode("utf-8"))
-        cand = res_json["candidates"][0]
-        parts = cand["content"]["parts"]
-        ans_chunks = [p.get("text", "") for p in parts if not p.get("thought", False) and p.get("text")]
-        final_text = "\n".join(ans_chunks).strip() if ans_chunks else parts[-1].get("text", "")
-        sources_md = ""
-        gm = cand.get("groundingMetadata", {})
-        chunks = gm.get("groundingChunks", [])
-        if chunks:
-          links, seen_u = [], set()
-          for ch in chunks:
-            w = ch.get("web", {})
-            u = w.get("uri")
-            if u and u not in seen_u:
-              seen_u.add(u)
-              links.append(f"[{w.get('title', u)}]({u})")
-          if links:
-            sources_md = "\n\n**Web Sources:** " + " | ".join(links[:6])
-        g_tag = "Google Search: ON" if enable_search else "Google Search: OFF"
-        return f"{final_text}{sources_md}\n\n---\n*Engine: `{model_name}` (REST Grounded) | {g_tag}*"
-    except Exception as e:
-      last_err = str(e)
-      continue
-  return f"Gemini API Error: {last_err[:220]}"
+      gen_variants.append((False, {"temperature": 0.35, "maxOutputTokens": 8192}))
+
+    for use_search_flag, g_cfg in gen_variants:
+      payload = {
+        "systemInstruction": {"parts": [{"text": sys_text}]},
+        "contents": rest_contents,
+        "generationConfig": g_cfg
+      }
+      if enable_search and use_search_flag:
+        payload["tools"] = [{"google_search": {}}]
+      try:
+        req = urllib.request.Request(
+          url,
+          data=json.dumps(payload).encode("utf-8"),
+          headers={"Content-Type": "application/json"},
+          method="POST"
+        )
+        with urllib.request.urlopen(req, timeout=60) as resp:
+          res_json = json.loads(resp.read().decode("utf-8"))
+          cand = res_json["candidates"][0]
+          parts = cand.get("content", {}).get("parts", [])
+          ans_chunks = [p.get("text", "") for p in parts if not p.get("thought", False) and p.get("text")]
+          final_text = "\n".join(ans_chunks).strip() if ans_chunks else (parts[-1].get("text", "") if parts else "")
+          if not final_text:
+            continue
+          sources_md = ""
+          gm = cand.get("groundingMetadata", {})
+          chunks = gm.get("groundingChunks", [])
+          if chunks:
+            links, seen_u = [], set()
+            for ch in chunks:
+              w = ch.get("web", {})
+              u = w.get("uri")
+              if u and u not in seen_u:
+                seen_u.add(u)
+                links.append(f"[{w.get('title', u)}]({u})")
+            if links:
+              sources_md = "\n\n**Web Sources:** " + " | ".join(links[:6])
+          g_tag = "Google Search: ON" if (enable_search and use_search_flag) else "Google Search: OFF (fallback)"
+          return f"{final_text}{sources_md}\n\n---\n*Engine: `{model_name}` (REST Grounded) | {g_tag} | Thinking: {lvl_upper}*"
+      except Exception as e:
+        err_msg = _format_http_err(e)
+        errors_log.append(f"REST/{model_name}: {err_msg}")
+        if "HTTP 404" in err_msg or "NOT_FOUND" in err_msg.upper():
+          break
+        continue
+
+  disc_note = f"Discovered models for your key: `{', '.join(discovered[:8])}`" if discovered else "Model discovery returned 0 models (verify your GEMINI_API_KEY in Google AI Studio)."
+  err_summary = " | ".join(errors_log[:4]) if errors_log else "Unknown error"
+  return f"Gemini API Error — {err_summary}\n\n{disc_note}"
 
 
 def build_second_order_strategist_prompt(report_mode="0615_MAIN", custom_newsletters_text=""):
@@ -3460,12 +3565,23 @@ def render_ai_copilot_tab():
   ctl1, ctl2, ctl3 = st.columns([1.6, 1.0, 1.0])
   model_choice = ctl1.selectbox(
     "AI Model Engine",
-    ["auto", "gemini-2.5-flash", "gemini-2.5-pro", "gemini-3.1-pro-preview"],
+    [
+      "auto",
+      "gemini-4-hydrogen",
+      "gemini-4-argon",
+      "gemini-4-carbon",
+      "gemini-3.8-flash",
+      "gemini-3.5-flash-lite",
+      "gemini-3.1-pro-preview"
+    ],
     index=0,
     format_func=lambda x: {
-      "auto": "Auto (Best Pro / Flash Grounded)",
-      "gemini-2.5-flash": "Gemini 2.5 Flash (Fast + Web Grounding)",
-      "gemini-2.5-pro": "Gemini 2.5 Pro (Deep Reasoning)",
+      "auto": "Auto (Best Active Grounded Model)",
+      "gemini-4-hydrogen": "Gemini 4 Hydrogen (Fast · General Default)",
+      "gemini-4-argon": "Gemini 4 Argon (Frontier Reasoning)",
+      "gemini-4-carbon": "Gemini 4 Carbon (Max Reasoning)",
+      "gemini-3.8-flash": "Gemini 3.8 Flash (Fast · Low Cost)",
+      "gemini-3.5-flash-lite": "Gemini 3.5 Flash-Lite (Ultra-Fast)",
       "gemini-3.1-pro-preview": "Gemini 3.1 Pro Preview"
     }[x]
   )
@@ -3648,11 +3764,20 @@ def render_ai_copilot_tab():
     curr_key = get_gemini_api_key()
     with st.expander("Gemini API Key Settings" if curr_key else "Enter Gemini API Key to Enable Chat", expanded=not bool(curr_key)):
       in_key = st.text_input("Gemini API Key (Google AI Studio)", value=curr_key, type="password", key="gem_key_in")
-      if st.button("Save API Key", key="save_gem_key"):
+      kc1, kc2 = st.columns(2)
+      if kc1.button("Save API Key", type="primary", use_container_width=True, key="save_gem_key"):
         settings["gemini_api_key"] = in_key.strip()
         save_json(SETTINGS_FILE, settings)
+        _discover_available_gemini_models.clear()
         st.success("API Key saved.")
         st.rerun()
+      if kc2.button("Check Available Models", use_container_width=True, key="chk_gem_models"):
+        _discover_available_gemini_models.clear()
+        avail = _discover_available_gemini_models(in_key.strip() or curr_key)
+        if avail:
+          st.success(f"Connected. Active models for your key: {', '.join(avail[:10])}")
+        else:
+          st.error("No models returned. Confirm your GEMINI_API_KEY is active in Google AI Studio.")
     chat_box = st.container(height=440)
     with chat_box:
       if not st.session_state.chat_messages:
@@ -3741,9 +3866,15 @@ def render_inline_dossier_chat(sym, d, funds):
     )
     dos_model = ic2.selectbox(
       "Model",
-      ["gemini-2.5-flash", "gemini-2.5-pro"],
+      ["auto", "gemini-4-hydrogen", "gemini-4-argon", "gemini-3.8-flash", "gemini-3.5-flash-lite"],
       index=0,
-      format_func=lambda x: "Flash (Fast)" if "flash" in x else "Pro (Deep)",
+      format_func=lambda x: {
+        "auto": "Auto (Fast)",
+        "gemini-4-hydrogen": "Hydrogen",
+        "gemini-4-argon": "Argon (Deep)",
+        "gemini-3.8-flash": "3.8 Flash",
+        "gemini-3.5-flash-lite": "3.5 Lite"
+      }[x],
       label_visibility="collapsed"
     )
     send_clicked = ic3.form_submit_button("Send", type="primary", use_container_width=True)
@@ -3754,7 +3885,7 @@ def render_inline_dossier_chat(sym, d, funds):
     with st.spinner(f"Searching live web & analyzing {sym}..."):
       ans = query_gemini_copilot(
         active_q, history[:-1], ticker_ctx,
-        model_pref=dos_model, thinking_level="LOW" if "flash" in dos_model else "MEDIUM", enable_search=True
+        model_pref=dos_model, thinking_level="HIGH" if "argon" in dos_model else "LOW", enable_search=True
       )
     history.append({"role": "assistant", "content": ans})
     st.session_state.dossier_chats[sym] = history
