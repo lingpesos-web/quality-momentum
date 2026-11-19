@@ -102,5 +102,18 @@
     "Gain_Loss_Pct": 0.0,
     "StopLoss": 233.5,
     "Remarks": "one day before ANT Ipo, expect money re-enter market, QQQ double bottom at 645, VIX over 25"
+  },
+  {
+    "Date": "2026-11-18",
+    "Timestamp": "2026-11-19 14:05",
+    "Action": "BUY",
+    "Ticker": "CRDO",
+    "Shares": 100,
+    "BuyPrice": 124.8,
+    "SellPrice": null,
+    "Gain_Loss_USD": 0.0,
+    "Gain_Loss_Pct": 0.0,
+    "StopLoss": 118.5,
+    "Remarks": "one day before ANT Ipo, expect money re-enter market, QQQ double bottom at 645, VIX over 25"
   }
 ]
