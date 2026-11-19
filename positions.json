@@ -41,5 +41,16 @@
     "Target15": 281.06,
     "HalfSold": false,
     "Remarks": "one day before ANT Ipo, expect money re-enter market, QQQ double bottom at 645, VIX over 25"
+  },
+  {
+    "id": "CRDO_1795097137",
+    "Ticker": "CRDO",
+    "BuyPrice": 124.8,
+    "Shares": 100,
+    "BuyDate": "2026-11-18",
+    "StopLoss": 118.5,
+    "Target15": 143.51999999999998,
+    "HalfSold": false,
+    "Remarks": "one day before ANT Ipo, expect money re-enter market, QQQ double bottom at 645, VIX over 25"
   }
 ]
