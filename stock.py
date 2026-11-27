@@ -140,7 +140,8 @@ for k, v in [
   ("opt_scan_label", ""),
   ("live_sort_sel", "Rank: Action Signal (Buy First)"),
   ("live_auto_ref_sel", "Auto: 60s"),
-  ("live_edit_mode", False)
+  ("live_edit_mode", False),
+  ("live_refresh_nonce", 0)
 ]:
   if k not in st.session_state:
     st.session_state[k] = v
@@ -200,10 +201,10 @@ h1{font-size:1.65rem !important;margin-bottom:0.45rem !important;}
 h2{font-size:1.30rem !important;margin-bottom:0.35rem !important;}
 h3{font-size:1.08rem !important;margin-bottom:0.30rem !important;}
 .num{font-family:'JetBrains Mono','Inter',monospace;font-variant-numeric:tabular-nums;}
-.macro-container{display:flex;flex-wrap:nowrap;gap:6px;overflow-x:auto;padding-bottom:4px;margin-bottom:8px;}
-.macro-card{flex:1 1 0px;min-width:96px;background:#ffffff;border:1px solid #e2dcd0;border-radius:6px;padding:6px 5px;text-align:center;box-shadow:0 1px 2px rgba(0,0,0,0.02);}
-.macro-title{font-size:0.64rem;color:#64748b;text-transform:uppercase;font-weight:700;letter-spacing:0.04em;white-space:nowrap;}
-.macro-price{font-size:0.84rem;font-weight:700;color:#111827;margin:1px 0;white-space:nowrap;font-variant-numeric:tabular-nums;}
+.macro-container{display:flex;flex-wrap:nowrap;gap:5px;overflow-x:auto;padding-bottom:3px;margin-bottom:6px;width:100%;}
+.macro-card{flex:1 1 0px;min-width:80px;background:#ffffff;border:1px solid #e2dcd0;border-radius:6px;padding:5px 4px;text-align:center;box-shadow:0 1px 2px rgba(0,0,0,0.02);line-height:1.22;}
+.macro-title{font-size:0.66rem;color:#64748b;text-transform:uppercase;font-weight:700;letter-spacing:0.03em;white-space:nowrap;}
+.macro-price{font-size:0.90rem;font-weight:800;color:#111827;margin:1px 0;white-space:nowrap;font-variant-numeric:tabular-nums;}
 .tick-pos{color:#15803d;font-size:0.70rem;font-weight:700;white-space:nowrap;font-variant-numeric:tabular-nums;}
 .tick-neg{color:#b91c1c;font-size:0.70rem;font-weight:700;white-space:nowrap;font-variant-numeric:tabular-nums;}
 .risk-strip{display:grid;grid-template-columns:repeat(5, minmax(0, 1fr));gap:8px;background:#0f291e;color:#f4efe6;border-radius:8px;padding:9px 14px;margin-bottom:12px;border:1px solid #1e4232;}
@@ -338,20 +339,56 @@ def get_all_monitored_tickers():
 
 
 DEFAULT_NTFY_TOPIC = "2026_USstockspicks" if not ACTIVE_USER else f"stocks_{ACTIVE_USER}"
+AI_MODEL_CHOICES = ["Flash", "Hydrogen", "Neon"]
+AI_MODEL_ID_MAP = {
+  "Flash": "gemini-3.8-flash",
+  "Hydrogen": "gemini-4-hydrogen",
+  "Neon": "gemini-4-neon"
+}
+AI_THINKING_CHOICES = ["High Thinking", "Medium Thinking", "Low Thinking (Fast)"]
+AI_THINKING_LEVEL_MAP = {
+  "High Thinking": "HIGH",
+  "Medium Thinking": "MEDIUM",
+  "Low Thinking (Fast)": "LOW"
+}
+
 settings = load_json(SETTINGS_FILE, {
   "w_fund": 40, "w_tech": 40, "w_mom": 20, "account_size": 100000,
   "news_limit": 60, "max_news_age_hours": 72, "alert_breakout": True, "alert_support": True,
   "notif_channel": "ntfy Push", "ntfy_topic": DEFAULT_NTFY_TOPIC,
-  "tg_bot_token": "", "tg_chat_id": ""
+  "tg_bot_token": "", "tg_chat_id": "",
+  "ai_model": "Flash", "ai_thinking_mode": "High Thinking", "ai_web_search": True
 })
 for k_s, v_s in [
   ("account_size", 100000), ("news_limit", 60), ("max_news_age_hours", 72),
   ("w_fund", 40), ("w_tech", 40), ("w_mom", 20),
   ("notif_channel", "ntfy Push"), ("ntfy_topic", DEFAULT_NTFY_TOPIC),
-  ("tg_bot_token", ""), ("tg_chat_id", "")
+  ("tg_bot_token", ""), ("tg_chat_id", ""),
+  ("ai_model", "Flash"), ("ai_thinking_mode", "High Thinking"), ("ai_web_search", True)
 ]:
   if k_s not in settings:
     settings[k_s] = v_s
+if settings.get("ai_model") in ("Argon", "gemini-4-argon"):
+  settings["ai_model"] = "Neon"
+elif settings.get("ai_model") == "gemini-4-hydrogen":
+  settings["ai_model"] = "Hydrogen"
+elif settings.get("ai_model") == "gemini-3.8-flash":
+  settings["ai_model"] = "Flash"
+if settings.get("ai_model") not in AI_MODEL_CHOICES:
+  settings["ai_model"] = "Flash"
+if settings.get("ai_thinking_mode") not in AI_THINKING_CHOICES:
+  settings["ai_thinking_mode"] = "High Thinking"
+
+
+def get_active_ai_config():
+  m_lbl = settings.get("ai_model", "Flash")
+  if m_lbl not in AI_MODEL_CHOICES:
+    m_lbl = "Flash"
+  t_lbl = settings.get("ai_thinking_mode", "High Thinking")
+  if t_lbl not in AI_THINKING_CHOICES:
+    t_lbl = "High Thinking"
+  w_search = bool(settings.get("ai_web_search", True))
+  return m_lbl, AI_MODEL_ID_MAP[m_lbl], t_lbl, AI_THINKING_LEVEL_MAP[t_lbl], w_search
 
 
 def send_ntfy_alert(message, title="Daily Portfolio Briefing"):
@@ -886,7 +923,7 @@ def analyze_six_playbooks(df, account_size=100000, spy_ret_63d=0.0, df_1h=None):
   elif is_stage2_higher_low:
     playbook_name = "Playbook 7: Stage 2 Higher Low"
     playbook_cat = "STAGE2_HL"
-    bos_level = max(float(high_arr[-2]), curr_close) if curr_close < prev_close else curr_close
+    bos_level = max(float(high_arr[-2]) if n >= 2 else curr_close, curr_close) if curr_close < prev_close else curr_close
     entry_ref = float(bos_level)
     effective_stop = max(min(recent_pb_low - 0.35 * atr14_daily, sma150), entry_ref * 0.935)
     target_price = max(high_20d_curr * 1.03, entry_ref + 2.5 * (entry_ref - effective_stop))
@@ -921,7 +958,7 @@ def analyze_six_playbooks(df, account_size=100000, spy_ret_63d=0.0, df_1h=None):
   elif is_holy_grail_pullback:
     playbook_name = "Playbook 3: 20-EMA Pullback Swing"
     playbook_cat = "SWING_PULLBACK"
-    bos_level = max(float(high_arr[-2]), curr_close) if curr_close < prev_close else curr_close
+    bos_level = max(float(high_arr[-2]) if n >= 2 else curr_close, curr_close) if curr_close < prev_close else curr_close
     entry_ref = float(bos_level)
     effective_stop = max(min(low_3d, ema20) - 0.5 * atr14_daily, entry_ref * 0.95)
     target_price = max(high_20d_prev * 1.02, entry_ref + 2.4 * (entry_ref - effective_stop))
@@ -1115,7 +1152,7 @@ def _extract_ticker_df(data, ticker, total_tickers):
   return pd.DataFrame()
 
 
-@st.cache_data(ttl=120, show_spinner=False)
+@st.cache_data(ttl=60, show_spinner=False)
 def _fetch_batch_market_data_cached(clean_tickers_tuple, account_size=100000, w_fund_pct=40, w_tech_pct=40, w_mom_pct=20, refresh_bucket=0):
   clean_tickers = list(clean_tickers_tuple)
   if not clean_tickers:
@@ -1127,7 +1164,7 @@ def _fetch_batch_market_data_cached(clean_tickers_tuple, account_size=100000, w_
     data_intraday = None
     if now_utc.hour in (13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 0, 1, 2, 3, 4, 5, 6):
       try:
-        data_intraday = yf.download(clean_tickers[:60], period="5d", interval="15m", group_by="ticker", progress=False)
+        data_intraday = yf.download(clean_tickers[:60], period="5d", interval="5m", group_by="ticker", progress=False)
       except Exception:
         data_intraday = None
   except Exception:
@@ -1148,16 +1185,28 @@ def _fetch_batch_market_data_cached(clean_tickers_tuple, account_size=100000, w_
   for t in clean_tickers:
     try:
       df = _extract_ticker_df(data, t, len(download_list))
+      if df is None or df.empty:
+        try:
+          df = yf.Ticker(t).history(period="1mo", interval="1d")
+        except Exception:
+          df = pd.DataFrame()
+      if df is None or df.empty:
+        continue
       df.dropna(subset=["Close", "High", "Low"], inplace=True)
-      if len(df) < 25:
+      if len(df) < 1:
         continue
       if data_intraday is not None:
         try:
           df_intra = _extract_ticker_df(data_intraday, t, len(clean_tickers[:60])).dropna(subset=["Close"])
           if not df_intra.empty:
-            intra_dates = pd.to_datetime(df_intra.index).tz_localize(None).normalize()
+            idx_i = pd.to_datetime(df_intra.index)
+            if idx_i.tz is not None:
+              intra_dates = idx_i.tz_convert("America/New_York").tz_localize(None).normalize()
+            else:
+              intra_dates = idx_i.tz_localize("UTC").tz_convert("America/New_York").tz_localize(None).normalize()
             last_intra_date = intra_dates[-1]
-            last_1d_date = pd.to_datetime(df.index[-1]).tz_localize(None).normalize()
+            idx_d_last = pd.to_datetime(df.index[-1])
+            last_1d_date = (idx_d_last.tz_localize(None) if idx_d_last.tz is not None else idx_d_last).normalize()
             ts = df_intra[intra_dates == last_intra_date]
             if not ts.empty:
               if last_intra_date > last_1d_date:
@@ -1184,16 +1233,16 @@ def _fetch_batch_market_data_cached(clean_tickers_tuple, account_size=100000, w_
       df["EMA150"] = df["Close"].ewm(span=150, adjust=False).mean()
       df["SMA150"] = df["Close"].rolling(150, min_periods=1).mean()
       df["EMA200"] = df["Close"].ewm(span=200, adjust=False).mean()
-      df["High20"] = df["High"].rolling(20).max()
-      df["High52"] = df["High"].rolling(252, min_periods=25).max()
-      df["Vol20"] = df["Volume"].fillna(0).rolling(20).mean()
-      df["BB_Mid"] = df["Close"].rolling(20).mean()
-      df["BB_Std"] = df["Close"].rolling(20).std()
+      df["High20"] = df["High"].rolling(20, min_periods=1).max()
+      df["High52"] = df["High"].rolling(252, min_periods=1).max()
+      df["Vol20"] = df["Volume"].fillna(0).rolling(20, min_periods=1).mean()
+      df["BB_Mid"] = df["Close"].rolling(20, min_periods=1).mean()
+      df["BB_Std"] = df["Close"].rolling(20, min_periods=1).std().fillna(0.0)
       df["BB_Upper"] = df["BB_Mid"] + (df["BB_Std"] * 2)
       df["BB_Lower"] = df["BB_Mid"] - (df["BB_Std"] * 2)
       delta = df["Close"].diff()
-      gain = delta.where(delta > 0, 0).rolling(14).mean()
-      loss = (-delta.where(delta < 0, 0)).rolling(14).mean()
+      gain = delta.where(delta > 0, 0).rolling(14, min_periods=1).mean()
+      loss = (-delta.where(delta < 0, 0)).rolling(14, min_periods=1).mean()
       df["RSI"] = 100 - (100 / (1 + (gain / (loss + 1e-9))))
       rsi = float(df["RSI"].iloc[-1]) if not np.isnan(df["RSI"].iloc[-1]) else 50.0
       ema12 = df["Close"].ewm(span=12, adjust=False).mean()
@@ -1276,7 +1325,9 @@ def _fetch_single_ticker_history_cached(sym, period="5y", interval="1d"):
   try:
     t = yf.Ticker(sym)
     df = t.history(period=period, interval=interval)
-    if df is None or df.empty or len(df) < 10:
+    if df is None or df.empty:
+      df = t.history(period="1mo", interval="1d")
+    if df is None or df.empty or len(df) < 1:
       return None, None
     try:
       df_1h = t.history(period="1mo", interval="1h")
@@ -1293,9 +1344,9 @@ def fetch_single_ticker_data(sym, account_size=100000, period="5y", interval="1d
   if period == "1y" and interval == "1d" and base_rec is not None and "EMA150" in base_rec["History"].columns:
     return base_rec
   df_raw, df_1h = _fetch_single_ticker_history_cached(sym, period=period, interval=interval)
-  if (df_raw is None or df_raw.empty or len(df_raw) < 20) and base_rec is not None:
+  if (df_raw is None or df_raw.empty or len(df_raw) < 1) and base_rec is not None:
     return base_rec
-  if df_raw is None or df_raw.empty or len(df_raw) < 10:
+  if df_raw is None or df_raw.empty or len(df_raw) < 1:
     return None
   try:
     df = df_raw.copy()
@@ -1306,13 +1357,13 @@ def fetch_single_ticker_data(sym, account_size=100000, period="5y", interval="1d
     df["EMA150"] = df["Close"].ewm(span=150, adjust=False).mean()
     df["SMA150"] = df["Close"].rolling(150, min_periods=1).mean()
     df["EMA200"] = df["Close"].ewm(span=200, adjust=False).mean()
-    df["Vol20"] = df["Volume"].fillna(0).rolling(20).mean()
-    df["BB_Mid"] = df["Close"].rolling(20).mean()
-    df["BB_Std"] = df["Close"].rolling(20).std()
+    df["Vol20"] = df["Volume"].fillna(0).rolling(20, min_periods=1).mean()
+    df["BB_Mid"] = df["Close"].rolling(20, min_periods=1).mean()
+    df["BB_Std"] = df["Close"].rolling(20, min_periods=1).std().fillna(0.0)
     df["BB_Upper"] = df["BB_Mid"] + (df["BB_Std"] * 2)
     df["BB_Lower"] = df["BB_Mid"] - (df["BB_Std"] * 2)
     delta = df["Close"].diff()
-    df["RSI"] = 100 - (100 / (1 + (delta.where(delta > 0, 0).rolling(14).mean() / ((-delta.where(delta < 0, 0)).rolling(14).mean() + 1e-9))))
+    df["RSI"] = 100 - (100 / (1 + (delta.where(delta > 0, 0).rolling(14, min_periods=1).mean() / ((-delta.where(delta < 0, 0)).rolling(14, min_periods=1).mean() + 1e-9))))
     df["MACD"] = df["Close"].ewm(span=12, adjust=False).mean() - df["Close"].ewm(span=26, adjust=False).mean()
     df["MACD_Signal"] = df["MACD"].ewm(span=9, adjust=False).mean()
     df["MACD_Hist"] = df["MACD"] - df["MACD_Signal"]
@@ -2973,87 +3024,245 @@ def fetch_sds_latest_videos():
   return sorted(merged, key=lambda x: str(x.get("date", "")), reverse=True)[:6]
 
 
-# --- LIVE MACRO & REGIME ENGINE (SUPPORTS LIVE AUTO-REFRESH BUCKETS) ---
+# --- LIVE 24H MACRO & REGIME ENGINE (10-CARD SINGLE ROW VIA LIGHTWEIGHT YAHOO V8 CHART API) ---
 MACRO_SYMBOLS = {
-  "S&P 500": "^GSPC", "Dow Jones": "^DJI", "Nasdaq": "^IXIC", "VIX": "^VIX",
-  "Gold": "GC=F", "Silver": "SI=F", "Copper": "HG=F",
-  "DXY (USD)": "DX-Y.NYB", "USD/JPY": "JPY=X", "Bitcoin": "BTC-USD", "Ethereum": "ETH-USD"
+  "S&P Fut": "ES=F",
+  "Dow Fut": "YM=F",
+  "Nasdaq Fut": "NQ=F",
+  "VIX": "^VIX",
+  "Gold": "GC=F",
+  "Silver": "SI=F",
+  "DXY": "DX-Y.NYB",
+  "USD/JPY": "JPY=X",
+  "BTC": "BTC-USD",
+  "ETH": "ETH-USD"
 }
 
 
-@st.cache_data(ttl=60, show_spinner=False)
+def _fetch_yf_v8_chart_quote(sym):
+  """Reads Yahoo Finance's lightweight v8/finance/chart meta directly (exact 24H live price & official prev close, zero tk.info throttling)."""
+  hdrs = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+    "Accept": "application/json"
+  }
+  enc_sym = urllib.parse.quote(str(sym).strip())
+  for host in ("query1.finance.yahoo.com", "query2.finance.yahoo.com"):
+    url = f"https://{host}/v8/finance/chart/{enc_sym}?range=1d&interval=1m&includePrePost=true"
+    try:
+      req = urllib.request.Request(url, headers=hdrs)
+      with urllib.request.urlopen(req, timeout=4.5) as resp:
+        payload = json.loads(resp.read().decode("utf-8"))
+      results = (payload.get("chart") or {}).get("result") or []
+      if not results:
+        continue
+      meta = results[0].get("meta") or {}
+      px = meta.get("regularMarketPrice")
+      prev_c = meta.get("previousClose")
+      if prev_c is None or float(prev_c) <= 0:
+        prev_c = meta.get("chartPreviousClose")
+      if px is not None and float(px) > 0:
+        px_f = float(px)
+        pc_f = float(prev_c) if (prev_c is not None and float(prev_c) > 0) else px_f
+        chg = px_f - pc_f
+        pct = (chg / pc_f * 100.0) if pc_f > 0 else 0.0
+        dh = float(meta.get("regularMarketDayHigh") or px_f)
+        dl = float(meta.get("regularMarketDayLow") or px_f)
+        return {
+          "Price": px_f, "Prev_Close": pc_f, "Change": chg, "Change_Pct": pct,
+          "Day_High": max(dh, px_f), "Day_Low": min(dl, px_f)
+        }
+    except Exception:
+      continue
+
+  # Lightweight fallback via yfinance fast_info (no quoteSummary/.info call)
+  try:
+    fi = getattr(yf.Ticker(sym), "fast_info", None)
+    if fi is not None:
+      px = getattr(fi, "last_price", None)
+      pc = getattr(fi, "previous_close", None)
+      if px is not None and float(px) > 0:
+        px_f = float(px)
+        pc_f = float(pc) if (pc is not None and float(pc) > 0) else px_f
+        chg = px_f - pc_f
+        pct = (chg / pc_f * 100.0) if pc_f > 0 else 0.0
+        dh = float(getattr(fi, "day_high", px_f) or px_f)
+        dl = float(getattr(fi, "day_low", px_f) or px_f)
+        return {
+          "Price": px_f, "Prev_Close": pc_f, "Change": chg, "Change_Pct": pct,
+          "Day_High": max(dh, px_f), "Day_Low": min(dl, px_f)
+        }
+  except Exception:
+    pass
+  return None
+
+
+@st.cache_data(ttl=45, show_spinner=False)
+def fetch_v8_quotes_batch(tickers_tuple, refresh_bucket=0):
+  syms = [str(s).strip().upper() for s in tickers_tuple if str(s).strip()]
+  if not syms:
+    return {}
+  res_list = _safe_parallel_map(lambda s: (s, _fetch_yf_v8_chart_quote(s)), syms, max_workers=5)
+  return {s: q for s, q in res_list if q is not None}
+
+
+@st.cache_data(ttl=600, show_spinner=False)
+def _fetch_sp500_regime_ema_cached():
+  try:
+    sp = yf.Ticker("^GSPC").history(period="3mo", interval="1d").dropna(subset=["Close"])
+    if len(sp) >= 50:
+      return (
+        float(sp["Close"].iloc[-1]),
+        float(sp["Close"].ewm(span=20, adjust=False).mean().iloc[-1]),
+        float(sp["Close"].ewm(span=50, adjust=False).mean().iloc[-1])
+      )
+  except Exception:
+    pass
+  return None
+
+
+@st.cache_data(ttl=45, show_spinner=False)
 def fetch_macro_and_regime(refresh_bucket=0):
   ticks = list(MACRO_SYMBOLS.values())
+  q_map = fetch_v8_quotes_batch(tuple(ticks), refresh_bucket=refresh_bucket)
   out = {}
+  for name, sym in MACRO_SYMBOLS.items():
+    q = q_map.get(sym.upper())
+    if q is not None:
+      out[name] = (q["Price"], q["Change"], q["Change_Pct"])
+
   regime = {
     "label": "MARKET REGIME: BULLISH — S&P 500 Holding Trend | Favorable for New Setups",
     "bg": "#dcfce7", "border": "#86efac", "color": "#14532d"
   }
-  try:
-    df = yf.download(ticks, period="3mo", interval="1d", group_by="ticker", progress=False)
-    df_intra = None
-    try:
-      df_intra = yf.download(ticks, period="2d", interval="5m", group_by="ticker", progress=False)
-    except Exception:
-      df_intra = None
-
-    for name, sym in MACRO_SYMBOLS.items():
-      sub = _extract_ticker_df(df, sym, len(ticks)).dropna(subset=["Close"])
-      if len(sub) >= 2:
-        c = float(sub["Close"].iloc[-1])
-        pc = float(sub["Close"].iloc[-2])
-        if df_intra is not None:
-          try:
-            sub_i = _extract_ticker_df(df_intra, sym, len(ticks)).dropna(subset=["Close"])
-            if not sub_i.empty:
-              c = float(sub_i["Close"].iloc[-1])
-          except Exception:
-            pass
-        out[name] = (c, c - pc, ((c - pc) / pc) * 100.0 if pc != 0 else 0.0)
-
-    sp = _extract_ticker_df(df, "^GSPC", len(ticks)).dropna(subset=["Close"])
-    if len(sp) >= 50:
-      sp_c = out.get("S&P 500", (float(sp["Close"].iloc[-1]), 0, 0))[0]
-      sp_ema20 = float(sp["Close"].ewm(span=20, adjust=False).mean().iloc[-1])
-      sp_ema50 = float(sp["Close"].ewm(span=50, adjust=False).mean().iloc[-1])
-      vix_c = out.get("VIX", (18.0, 0, 0))[0]
-      if sp_c > sp_ema50 and sp_c > sp_ema20 and vix_c < 21.0:
-        regime = {
-          "label": f"MARKET REGIME: BULLISH (S&P 500 > 20 & 50 EMA | VIX {vix_c:.1f}) — Green Light for Stage 2, Swing & Momentum Buys",
-          "bg": "#dcfce7", "border": "#86efac", "color": "#14532d"
-        }
-      elif sp_c < sp_ema50 or vix_c >= 25.0:
-        regime = {
-          "label": f"MARKET REGIME: RISK-OFF (S&P < 50 EMA or VIX {vix_c:.1f}) — Protect Capital, Avoid Aggressive Longs",
-          "bg": "#fee2e2", "border": "#fca5a5", "color": "#7f1d1d"
-        }
-      else:
-        regime = {
-          "label": f"MARKET REGIME: CHOPPY / CAUTION (S&P Consolidating | VIX {vix_c:.1f}) — Selective 20-EMA Pullbacks & TCT Boxes Only",
-          "bg": "#fef9c3", "border": "#fde047", "color": "#713f12"
-        }
-  except Exception:
-    pass
+  sp_stats = _fetch_sp500_regime_ema_cached()
+  if sp_stats is not None:
+    sp_c, sp_ema20, sp_ema50 = sp_stats
+    vix_c = out.get("VIX", (18.0, 0.0, 0.0))[0]
+    if sp_c > sp_ema50 and sp_c > sp_ema20 and vix_c < 21.0:
+      regime = {
+        "label": f"MARKET REGIME: BULLISH (S&P 500 > 20 & 50 EMA | VIX {vix_c:.1f}) — Green Light for Stage 2, Swing & Momentum Buys",
+        "bg": "#dcfce7", "border": "#86efac", "color": "#14532d"
+      }
+    elif sp_c < sp_ema50 or vix_c >= 25.0:
+      regime = {
+        "label": f"MARKET REGIME: RISK-OFF (S&P < 50 EMA or VIX {vix_c:.1f}) — Protect Capital, Avoid Aggressive Longs",
+        "bg": "#fee2e2", "border": "#fca5a5", "color": "#7f1d1d"
+      }
+    else:
+      regime = {
+        "label": f"MARKET REGIME: CHOPPY / CAUTION (S&P Consolidating | VIX {vix_c:.1f}) — Selective 20-EMA Pullbacks & TCT Boxes Only",
+        "bg": "#fef9c3", "border": "#fde047", "color": "#713f12"
+      }
   return out, regime
 
 
 def render_macro_bar_html(macro_data, regime_info, compact=False):
   if macro_data:
-    cards_html = "".join([
-      f'<div class="macro-card"><div class="macro-title">{name}</div>'
-      f'<div class="macro-price">{price:,.2f}</div>'
-      f'<div class="{"tick-pos" if chg >= 0 else "tick-neg"}">'
-      f'{"+" if chg >= 0 else ""}{chg:.2f} ({"+" if chg >= 0 else ""}{pct:.2f}%)</div></div>'
-      for name, (price, chg, pct) in macro_data.items()
-    ])
-    st.markdown(f'<div class="macro-container">{cards_html}</div>', unsafe_allow_html=True)
+    cards = []
+    for name, (price, chg, pct) in macro_data.items():
+      if name == "BTC":
+        p_str = f"{price:,.0f}"
+        c_str = f"{chg:+,.0f}"
+      elif abs(price) >= 1000:
+        p_str = f"{price:,.1f}"
+        c_str = f"{chg:+,.1f}"
+      else:
+        p_str = f"{price:,.2f}"
+        c_str = f"{chg:+,.2f}"
+      cls = "tick-pos" if chg >= 0 else "tick-neg"
+      cards.append(
+        f'<div class="macro-card"><div class="macro-title">{name}</div>'
+        f'<div class="macro-price">{p_str}</div>'
+        f'<div class="{cls}">{c_str} ({pct:+.2f}%)</div></div>'
+      )
+    st.markdown(f'<div class="macro-container">{"".join(cards)}</div>', unsafe_allow_html=True)
   if regime_info and not compact:
     st.markdown(
       f'<div style="background:{regime_info["bg"]}; border:1px solid {regime_info["border"]}; '
       f'color:{regime_info["color"]}; padding:6px 12px; border-radius:6px; '
-      f'font-size:0.78rem; font-weight:700; margin-bottom:12px;">{regime_info["label"]}</div>',
+      f'font-size:0.78rem; font-weight:700; margin-bottom:10px;">{regime_info["label"]}</div>',
       unsafe_allow_html=True
     )
+
+
+def _compute_ext_quote_from_5m(df_5m, fallback_ref=None):
+  """Computes live Pre-Market, After-Hours, 23H Overnight, or active RTH quote from 5m prepost=True bars."""
+  if df_5m is None or df_5m.empty:
+    return None
+  sub = df_5m.dropna(subset=["Close"]).copy()
+  if sub.empty:
+    return None
+  idx_ts = pd.to_datetime(sub.index)
+  if idx_ts.tz is None:
+    idx_et = idx_ts.tz_localize("UTC").tz_convert("America/New_York")
+  else:
+    idx_et = idx_ts.tz_convert("America/New_York")
+  sub["_date"] = idx_et.date
+  sub["_mins"] = idx_et.hour * 60 + idx_et.minute
+  is_rth = (sub["_mins"] >= 570) & (sub["_mins"] < 960)
+  last_row = sub.iloc[-1]
+  last_px = float(last_row["Close"])
+  last_date = last_row["_date"]
+  last_mins = int(last_row["_mins"])
+
+  if last_mins >= 960:
+    sess_tag = "POST" if last_mins < 1200 else "23H"
+    rth_ref = sub[is_rth & (sub["_date"] <= last_date)]
+    ref_close = float(rth_ref["Close"].iloc[-1]) if not rth_ref.empty else (fallback_ref or float(sub["Close"].iloc[0]))
+    sess_slice = sub[(sub["_date"] == last_date) & (sub["_mins"] >= 960)]
+  elif last_mins < 570:
+    sess_tag = "PRE" if last_mins >= 240 else "23H"
+    rth_prev = sub[is_rth & (sub["_date"] < last_date)]
+    ref_close = float(rth_prev["Close"].iloc[-1]) if not rth_prev.empty else (fallback_ref or float(sub["Close"].iloc[0]))
+    sess_slice = sub[(sub["_date"] == last_date) & (sub["_mins"] < 570)]
+  else:
+    sess_tag = "RTH"
+    rth_prev = sub[is_rth & (sub["_date"] < last_date)]
+    ref_close = float(rth_prev["Close"].iloc[-1]) if not rth_prev.empty else (fallback_ref or float(sub["Close"].iloc[0]))
+    sess_slice = sub[(sub["_date"] == last_date) & is_rth]
+
+  if sess_slice.empty:
+    sess_slice = sub.tail(1)
+  ext_high = float(sess_slice["High"].max()) if "High" in sess_slice.columns else last_px
+  ext_low = float(sess_slice["Low"].min()) if "Low" in sess_slice.columns else last_px
+  ext_chg = last_px - ref_close
+  ext_pct = (ext_chg / ref_close * 100.0) if ref_close > 0 else 0.0
+  return {
+    "Price": last_px,
+    "Ref_Close": ref_close,
+    "Change": ext_chg,
+    "Change_Pct": ext_pct,
+    "Day_High": max(ext_high, last_px),
+    "Day_Low": min(ext_low, last_px),
+    "Session": sess_tag
+  }
+
+
+@st.cache_data(ttl=45, show_spinner=False)
+def fetch_extended_hours_quotes_batch(tickers_tuple, refresh_bucket=0):
+  """Single batched yf.download(prepost=True) for Pre/Post/23H quotes — zero tk.info rate-limit risk."""
+  syms = [str(s).strip().upper() for s in tickers_tuple if str(s).strip()]
+  if not syms:
+    return {}
+  out = {}
+  try:
+    df_5m = yf.download(syms[:60], period="5d", interval="5m", prepost=True, group_by="ticker", progress=False)
+    for sym in syms[:60]:
+      try:
+        sub_5 = _extract_ticker_df(df_5m, sym, len(syms[:60]))
+        if sub_5 is None or sub_5.empty:
+          try:
+            sub_5 = yf.Ticker(sym).history(period="5d", interval="5m", prepost=True)
+          except Exception:
+            sub_5 = pd.DataFrame()
+        ext_q = _compute_ext_quote_from_5m(sub_5)
+        if ext_q is not None:
+          out[sym] = ext_q
+      except Exception:
+        continue
+  except Exception:
+    pass
+  return out
 
 
 # --- GEMINI AI CO-PILOT WITH NATIVE GOOGLE SEARCH GROUNDING (google-genai SDK + REST FALLBACK) ---
@@ -3230,10 +3439,10 @@ def _discover_available_gemini_models(api_key):
 
   def _rank_model(m_str):
     ml = m_str.lower()
-    if ml == "gemini-4-hydrogen": return 1
-    if ml == "gemini-4-argon": return 2
-    if ml == "gemini-4-carbon": return 3
-    if ml == "gemini-3.8-flash": return 4
+    if ml == "gemini-3.8-flash": return 1
+    if ml == "gemini-4-hydrogen": return 2
+    if ml == "gemini-4-neon": return 3
+    if ml == "gemini-4-carbon": return 4
     if ml == "gemini-3.6-flash": return 5
     if ml == "gemini-3.1-pro-preview": return 6
     if ml == "gemini-3.5-flash-lite": return 7
@@ -3279,11 +3488,10 @@ def query_gemini_copilot(user_prompt, chat_history, portfolio_context, model_pre
 
   discovered = _discover_available_gemini_models(api_key)
   verified_active_defaults = [
-    "gemini-4-hydrogen",
-    "gemini-4-argon",
     "gemini-3.8-flash",
-    "gemini-4-carbon",
-    "gemini-3.5-flash-lite",
+    "gemini-4-hydrogen",
+    "gemini-4-neon",
+    "gemini-3-flash-preview",
     "gemini-3.1-pro-preview",
     "gemini-2.5-flash",
     "gemini-2.5-pro"
@@ -3562,36 +3770,11 @@ def render_ai_copilot_tab():
       st.session_state["strategist_report"] = saved_rep.get("body", "")
       st.session_state["strategist_report_title"] = saved_rep.get("title", "Daily Chief Strategist Report")
 
-  ctl1, ctl2, ctl3 = st.columns([1.6, 1.0, 1.0])
-  model_choice = ctl1.selectbox(
-    "AI Model Engine",
-    [
-      "auto",
-      "gemini-4-hydrogen",
-      "gemini-4-argon",
-      "gemini-4-carbon",
-      "gemini-3.8-flash",
-      "gemini-3.5-flash-lite",
-      "gemini-3.1-pro-preview"
-    ],
-    index=0,
-    format_func=lambda x: {
-      "auto": "Auto (Best Active Grounded Model)",
-      "gemini-4-hydrogen": "Gemini 4 Hydrogen (Fast · General Default)",
-      "gemini-4-argon": "Gemini 4 Argon (Frontier Reasoning)",
-      "gemini-4-carbon": "Gemini 4 Carbon (Max Reasoning)",
-      "gemini-3.8-flash": "Gemini 3.8 Flash (Fast · Low Cost)",
-      "gemini-3.5-flash-lite": "Gemini 3.5 Flash-Lite (Ultra-Fast)",
-      "gemini-3.1-pro-preview": "Gemini 3.1 Pro Preview"
-    }[x]
+  ai_m_lbl, model_choice, ai_t_lbl, thinking_choice, enable_web_search = get_active_ai_config()
+  st.caption(
+    f"Active AI Engine: **{ai_m_lbl} (`{model_choice}`) | {ai_t_lbl} | Google Search: {'ON' if enable_web_search else 'OFF'}** "
+    f"— Configure Model & Thinking Mode globally in Settings."
   )
-  thinking_choice = ctl2.selectbox(
-    "Thinking Depth",
-    ["HIGH", "MEDIUM", "LOW"],
-    index=1,
-    format_func=lambda x: {"HIGH": "High Thinking", "MEDIUM": "Medium Thinking", "LOW": "Low Thinking (Fast)"}[x]
-  )
-  enable_web_search = ctl3.checkbox("Live Google Search Grounding", value=True, key="copilot_web_grounding")
 
   btn_r1, btn_r2, btn_r3, btn_r4 = st.columns(4)
   run_main_btn = btn_r1.button("1. Run 06:15 AM Global Anticipation", type="primary", use_container_width=True)
@@ -3856,25 +4039,15 @@ def render_inline_dossier_chat(sym, d, funds):
     st.session_state.dossier_chats[sym] = []
     st.rerun()
 
+  dos_m_lbl, dos_model, dos_t_lbl, dos_t_level, dos_web_search = get_active_ai_config()
+  st.caption(f"Engine: **{dos_m_lbl} (`{dos_model}`) | {dos_t_lbl}** — Managed in Settings.")
+
   # Inline compact form input right below the 3 buttons (iPad friendly — stays close to chart)
   with st.form(key=f"dos_chat_form_{sym}", clear_on_submit=True):
-    ic1, ic2, ic3 = st.columns([4.8, 1.1, 0.9])
+    ic1, ic3 = st.columns([5.8, 1.0])
     user_text = ic1.text_input(
       f"Ask about {sym}",
       placeholder=f"Ask about {sym} (e.g. Is this pullback safe before earnings? Which LEAPS strike fits?)",
-      label_visibility="collapsed"
-    )
-    dos_model = ic2.selectbox(
-      "Model",
-      ["auto", "gemini-4-hydrogen", "gemini-4-argon", "gemini-3.8-flash", "gemini-3.5-flash-lite"],
-      index=0,
-      format_func=lambda x: {
-        "auto": "Auto (Fast)",
-        "gemini-4-hydrogen": "Hydrogen",
-        "gemini-4-argon": "Argon (Deep)",
-        "gemini-3.8-flash": "3.8 Flash",
-        "gemini-3.5-flash-lite": "3.5 Lite"
-      }[x],
       label_visibility="collapsed"
     )
     send_clicked = ic3.form_submit_button("Send", type="primary", use_container_width=True)
@@ -3882,10 +4055,10 @@ def render_inline_dossier_chat(sym, d, funds):
   active_q = prompt_clicked or (user_text.strip() if send_clicked and user_text.strip() else None)
   if active_q:
     history.append({"role": "user", "content": active_q})
-    with st.spinner(f"Searching live web & analyzing {sym}..."):
+    with st.spinner(f"Analyzing {sym} with {dos_m_lbl} ({dos_t_lbl})..."):
       ans = query_gemini_copilot(
         active_q, history[:-1], ticker_ctx,
-        model_pref=dos_model, thinking_level="HIGH" if "argon" in dos_model else "LOW", enable_search=True
+        model_pref=dos_model, thinking_level=dos_t_level, enable_search=dos_web_search
       )
     history.append({"role": "assistant", "content": ans})
     st.session_state.dossier_chats[sym] = history
@@ -3913,7 +4086,7 @@ st.sidebar.markdown(
   'EDITORIAL TERMINAL ENGINE</span>'
   '<h2 style="color:#f4efe6 !important;margin:5px 0 0 0;font-size:1.35rem;">Ledger</h2>'
   '<span style="font-size:0.70rem;color:#c5a059;text-transform:uppercase;'
-  'letter-spacing:0.1em;font-weight:700;">Momentum | Stage 2 | Options v12</span></div>',
+  'letter-spacing:0.1em;font-weight:700;">Momentum | Stage 2 | Options v12.3</span></div>',
   unsafe_allow_html=True
 )
 navigation = st.sidebar.radio(
@@ -3934,7 +4107,8 @@ navigation = st.sidebar.radio(
 )
 st.sidebar.markdown("---")
 sync_badge = "GitHub Auto-Sync Active" if get_github_token() else "Local Mode (Add GITHUB_TOKEN)"
-ai_badge = "Web Grounding: google-genai" if HAS_GOOGLE_GENAI else "Web Grounding: REST Fallback"
+sb_m_lbl, _, sb_t_lbl, _, _ = get_active_ai_config()
+ai_badge = f"AI: {sb_m_lbl} | {sb_t_lbl}"
 st.sidebar.markdown(
   f'<div style="position:fixed;bottom:14px;font-size:0.70rem;color:#a1a1aa;line-height:1.45;">'
   f'{sync_badge}<br>{ai_badge}<br>Tap any <b>Ticker</b> for Dossier + AI Chat</div>',
@@ -4254,15 +4428,31 @@ else:
     render_ai_copilot_tab()
 
   elif navigation == "Live Real-Time Quotes":
-    st.markdown("""<style>.block-container { padding-top: 2.2rem !important; padding-bottom: 0.8rem !important; padding-left: 1.0rem !important; padding-right: 1.0rem !important; }</style>""", unsafe_allow_html=True)
+    st.markdown(
+      """<style>
+      .block-container { padding-top: 3.65rem !important; padding-bottom: 0.4rem !important; padding-left: 0.75rem !important; padding-right: 0.75rem !important; max-width: 100% !important; }
+      [data-testid="stVerticalBlock"] { gap: 0.28rem !important; }
+      .live-board-grid { gap: 10px !important; }
+      .live-quote-table { font-size: 1.12rem !important; }
+      .live-quote-table thead th { padding: 5px 6px !important; font-size: 0.80rem !important; }
+      .live-quote-table tbody tr { line-height: 1.24 !important; }
+      .live-quote-table td { padding: 4px 6px !important; }
+      .rt-sym-link { font-size: 1.16rem !important; }
+      </style>""",
+      unsafe_allow_html=True
+    )
+    PREPOST_OPTION = "Pre & Post Market (Active Portfolio)"
     folder_names = list(watchlists.keys())
-    folder_options = folder_names + ["All Watchlists Combined"]
+    other_folders = [f for f in folder_names if f != "Active Portfolio"]
+    folder_options = ["Active Portfolio", PREPOST_OPTION] + other_folders + ["All Watchlists Combined"]
 
     selected_live_folder = st.session_state.get("live_folder_sel", folder_options[0])
     if selected_live_folder not in folder_options:
       selected_live_folder = folder_options[0]
       st.session_state.live_folder_sel = selected_live_folder
 
+    is_prepost_mode = (selected_live_folder == PREPOST_OPTION)
+    target_edit_folder = "Active Portfolio" if is_prepost_mode else selected_live_folder
     live_sort = st.session_state.get("live_sort_sel", "Rank: Action Signal (Buy First)")
     auto_refresh_choice = st.session_state.get("live_auto_ref_sel", "Auto: 60s")
     edit_mode_live = bool(st.session_state.get("live_edit_mode", False))
@@ -4312,34 +4502,34 @@ else:
           st.rerun()
 
         if selected_live_folder not in ("All Watchlists Combined", "Active Positions"):
-          lv_add_key = f"lv_qadd_{selected_live_folder}"
+          lv_add_key = f"lv_qadd_{target_edit_folder}"
           def _commit_lv_add():
             raw_v = st.session_state.get(lv_add_key, "").upper().strip()
             if raw_v:
               added_any = False
               for tk in [x.strip() for x in raw_v.replace(",", " ").split() if x.strip()]:
-                if tk not in watchlists[selected_live_folder]:
-                  watchlists[selected_live_folder].append(tk)
+                if tk not in watchlists[target_edit_folder]:
+                  watchlists[target_edit_folder].append(tk)
                   added_any = True
               if added_any:
                 sync_file_to_github(watchlists, DATA_FILE)
-                st.toast(f"Added {raw_v} to {selected_live_folder}")
+                st.toast(f"Added {raw_v} to {target_edit_folder}")
               try:
                 st.session_state[lv_add_key] = ""
               except Exception:
                 pass
           st.text_input(
-            f"Quick Add to {selected_live_folder}",
-            placeholder="e.g. AVGO, MU",
+            f"Quick Add to {target_edit_folder}",
+            placeholder="e.g. ANT, AVGO, MU",
             key=lv_add_key,
             on_change=_commit_lv_add
           )
 
         b_pop1, b_pop2 = st.columns(2)
         if b_pop1.button("Refresh Now", type="primary", use_container_width=True, key="pop_ref_now"):
-          st.cache_data.clear()
+          st.session_state.live_refresh_nonce = int(st.session_state.get("live_refresh_nonce", 0)) + 1
           st.rerun()
-        if selected_live_folder != "Active Positions":
+        if selected_live_folder not in ("Active Positions", "All Watchlists Combined"):
           ed_chk = b_pop2.checkbox("Edit List", value=edit_mode_live, key="pop_edit_chk")
           if ed_chk != edit_mode_live:
             st.session_state.live_edit_mode = ed_chk
@@ -4350,16 +4540,21 @@ else:
       active_live_syms = get_all_monitored_tickers()
     elif selected_live_folder == "Active Positions":
       active_live_syms = [p["Ticker"] for p in positions]
+    elif is_prepost_mode:
+      active_live_syms = list(watchlists.get("Active Portfolio", []))
     else:
       active_live_syms = list(watchlists.get(selected_live_folder, []))
 
     run_every_sec = {"Auto: Off": None, "Auto: 15s": 15, "Auto: 30s": 30, "Auto: 60s": 60}.get(auto_refresh_choice)
     ref_tag = f"{run_every_sec}s Live" if run_every_sec else "Manual"
+    mode_lbl = "Pre/Post Extended" if is_prepost_mode else "Live RTH"
     with top_l:
       st.markdown(
         f'<div class="live-status-bar">'
         f'<span class="live-dot"></span>'
         f'<span>{selected_live_folder}</span>'
+        f'<span style="color:#94a3b8;">|</span>'
+        f'<span style="color:#0f5132;font-weight:700;">{mode_lbl}</span>'
         f'<span style="color:#94a3b8;">|</span>'
         f'<span>{ref_tag}</span>'
         f'<span style="color:#94a3b8;">|</span>'
@@ -4371,15 +4566,41 @@ else:
       )
 
     if edit_mode_live and selected_live_folder not in ("Active Positions", "All Watchlists Combined"):
-      render_watchlist_reorder_panel(selected_live_folder, key_prefix="lv")
+      render_watchlist_reorder_panel(target_edit_folder, key_prefix="lv")
 
     def render_live_watchboard_content():
-      bucket = int(time.time() // run_every_sec) if run_every_sec else int(time.time() // 60)
-      # Live Macro Strip inside the auto-refresh container so macro cards & stock quotes tick together
+      nonce = int(st.session_state.get("live_refresh_nonce", 0))
+      bucket = (int(time.time() // run_every_sec) if run_every_sec else int(time.time() // 45)) + nonce * 100000
+      # Live 10-Card 24H Macro Strip inside the auto-refresh container
       live_macro, live_regime = fetch_macro_and_regime(refresh_bucket=bucket)
       render_macro_bar_html(live_macro, live_regime, compact=True)
 
       live_records = fetch_batch_market_data(active_live_syms, account_size=settings["account_size"], refresh_bucket=bucket)
+      if is_prepost_mode:
+        ext_map = fetch_extended_hours_quotes_batch(tuple(active_live_syms), refresh_bucket=bucket)
+        merged_records = {}
+        for s_ep in active_live_syms:
+          base_r = dict(live_records[s_ep]) if s_ep in live_records else None
+          ext_r = ext_map.get(s_ep)
+          if base_r is not None and ext_r is not None:
+            base_r["Price"] = ext_r["Price"]
+            base_r["Change"] = ext_r["Change"]
+            base_r["Change_Pct"] = ext_r["Change_Pct"]
+            base_r["Day_High"] = ext_r["Day_High"]
+            base_r["Day_Low"] = ext_r["Day_Low"]
+            base_r["Ext_Session"] = ext_r["Session"]
+            merged_records[s_ep] = base_r
+          elif base_r is not None:
+            base_r["Ext_Session"] = "RTH"
+            merged_records[s_ep] = base_r
+          elif ext_r is not None:
+            merged_records[s_ep] = {
+              "Ticker": s_ep, "Price": ext_r["Price"], "Change": ext_r["Change"], "Change_Pct": ext_r["Change_Pct"],
+              "Day_High": ext_r["Day_High"], "Day_Low": ext_r["Day_Low"],
+              "TCT_Short_Sig": "NEW/EXT", "TCT_Sig_Bg": "#fef9c3", "TCT_Sig_Color": "#854d0e",
+              "TCT_Priority": 3, "Score": 50, "RS_Diff": 0.0, "Ext_Session": ext_r["Session"]
+            }
+        live_records = merged_records
       ordered_syms = [s for s in active_live_syms if s in live_records]
       if live_sort == "Rank: Action Signal (Buy First)":
         ordered_syms = sorted(ordered_syms, key=lambda s: (live_records[s]["TCT_Priority"], -live_records[s]["Score"]))
@@ -4461,7 +4682,9 @@ else:
               f'<td style="color:#b91c1c;font-weight:600;">{d["Day_Low"]:,.2f}</td>'
               f'</tr>'
             )
-          return f'<table class="live-quote-table"><thead><tr><th>Signal</th><th>Symbol</th><th>Price</th><th>Day Chg ($ / %)</th><th>High</th><th>Low</th></tr></thead><tbody>{rows_html}</tbody></table>'
+          px_hdr = "Pre/Post Price" if is_prepost_mode else "Price"
+          chg_hdr = "Ext Chg ($ / %)" if is_prepost_mode else "Day Chg ($ / %)"
+          return f'<table class="live-quote-table"><thead><tr><th>Signal</th><th>Symbol</th><th>{px_hdr}</th><th>{chg_hdr}</th><th>High</th><th>Low</th></tr></thead><tbody>{rows_html}</tbody></table>'
 
         if ordered_syms:
           mid = (len(ordered_syms) + 1) // 2
@@ -4814,6 +5037,16 @@ new TradingView.widget({{
     }
     all_mcf_syms = list(METALS_GROUP.values()) + list(CRYPTO_GROUP.values()) + list(FX_GROUP.values())
     mcf_data = fetch_batch_market_data(all_mcf_syms, account_size=settings["account_size"])
+    live_mcf_v8 = fetch_v8_quotes_batch(tuple(all_mcf_syms), refresh_bucket=int(time.time() // 45))
+    for sym_m, q_m in live_mcf_v8.items():
+      if sym_m in mcf_data:
+        m_copy = dict(mcf_data[sym_m])
+        m_copy["Price"] = q_m["Price"]
+        m_copy["Change"] = q_m["Change"]
+        m_copy["Change_Pct"] = q_m["Change_Pct"]
+        m_copy["Day_High"] = q_m["Day_High"]
+        m_copy["Day_Low"] = q_m["Day_Low"]
+        mcf_data[sym_m] = m_copy
 
     def render_asset_group(group_dict):
       c1, c2 = st.columns(2)
@@ -4890,8 +5123,61 @@ new TradingView.widget({{
       if st.button("Save Account & Scoring Settings", type="primary", use_container_width=True):
         settings.update({"account_size": acc_val, "news_limit": news_lim, "max_news_age_hours": max_age_h, "w_fund": w_f, "w_tech": w_t, "w_mom": w_m})
         ok_s, msg_s = sync_file_to_github(settings, SETTINGS_FILE)
-        st.cache_data.clear()
+        st.session_state.live_refresh_nonce = int(st.session_state.get("live_refresh_nonce", 0)) + 1
         st.success(f"Settings saved ({msg_s})")
+
+      st.markdown("---")
+      st.subheader("AI Model & Thinking Engine (AI Macro & Stock Dossier)")
+      st.caption("Global engine applied automatically to both the AI Macro & Trade Co-Pilot tab and the Stock Dossier inline chat.")
+      cur_m_lbl, _, cur_t_lbl, _, cur_ws = get_active_ai_config()
+      ai_c1, ai_c2 = st.columns(2)
+      sel_ai_model = ai_c1.selectbox(
+        "AI Model",
+        AI_MODEL_CHOICES,
+        index=AI_MODEL_CHOICES.index(cur_m_lbl),
+        format_func=lambda x: f"{x} ({AI_MODEL_ID_MAP[x]})",
+        key="set_ai_model_sel"
+      )
+      sel_ai_think = ai_c2.selectbox(
+        "Thinking Mode",
+        AI_THINKING_CHOICES,
+        index=AI_THINKING_CHOICES.index(cur_t_lbl),
+        key="set_ai_think_sel"
+      )
+      sel_ai_ws = st.checkbox("Enable Live Google Search Grounding", value=cur_ws, key="set_ai_ws_chk")
+      curr_api_k = get_gemini_api_key()
+      if curr_api_k:
+        st.caption("API Key Status: **GEMINI_API_KEY Connected**")
+      else:
+        st.warning('GEMINI_API_KEY not found. Add GEMINI_API_KEY = "AIzaSy..." in Streamlit Secrets or enter it in AI Macro tab.')
+      ab1, ab2 = st.columns(2)
+      if ab1.button("Save AI Engine Settings", type="primary", use_container_width=True, key="set_save_ai_btn"):
+        settings.update({
+          "ai_model": sel_ai_model,
+          "ai_thinking_mode": sel_ai_think,
+          "ai_web_search": bool(sel_ai_ws)
+        })
+        ok_a, msg_a = sync_file_to_github(settings, SETTINGS_FILE)
+        st.success(f"Active AI set to {sel_ai_model} ({AI_MODEL_ID_MAP[sel_ai_model]}) | {sel_ai_think} ({msg_a})")
+      if ab2.button("Test AI Connection", use_container_width=True, key="set_test_ai_btn"):
+        settings.update({
+          "ai_model": sel_ai_model,
+          "ai_thinking_mode": sel_ai_think,
+          "ai_web_search": bool(sel_ai_ws)
+        })
+        with st.spinner(f"Testing {sel_ai_model} ({sel_ai_think})..."):
+          test_reply = query_gemini_copilot(
+            "Reply with one short sentence confirming you are online.",
+            [],
+            "Connection health check.",
+            model_pref=AI_MODEL_ID_MAP[sel_ai_model],
+            thinking_level=AI_THINKING_LEVEL_MAP[sel_ai_think],
+            enable_search=False
+          )
+        if test_reply.startswith("Gemini API Error") or test_reply.startswith("Please enter"):
+          st.error(test_reply)
+        else:
+          st.success(test_reply.split("\n---")[0][:160])
 
     with s_col2:
       st.subheader("2. Notification Channel Setup (ntfy / Telegram)")
