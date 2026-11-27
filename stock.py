@@ -137,7 +137,13 @@ for k, v in [
   ("strategist_report", ""),
   ("strategist_report_title", ""),
   ("opt_scan_results", None),
+  ("opt_scan_all_liquid", []),
+  ("opt_scan_meta", {}),
   ("opt_scan_label", ""),
+  ("opt_scan_source_last", ""),
+  ("opt_chain_cache", {}),
+  ("earnings_cache_store", {}),
+  ("earnings_refresh_nonce", 0),
   ("live_sort_sel", "Rank: Action Signal (Buy First)"),
   ("live_auto_ref_sel", "Auto: 60s"),
   ("live_edit_mode", False),
@@ -622,40 +628,159 @@ def fetch_metals_crypto_fx_news(max_items=50, max_age_hours=72):
   return sorted(pool, key=lambda x: x["timestamp"], reverse=True)[:max_items]
 
 
-@st.cache_data(ttl=14400, show_spinner=False)
-def fetch_upcoming_earnings_map(tickers):
-  if not tickers:
-    return {}
-  out = {}
-  now_dt = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+def _parse_nasdaq_earnings_time(raw_t):
+  s = str(raw_t or "").strip().lower()
+  if "pre-market" in s or "bmo" in s or "before" in s:
+    return "BMO"
+  if "after-hours" in s or "amc" in s or "after" in s:
+    return "AMC"
+  return "TBD"
 
-  def _check_one(sym):
-    if any(ch in sym for ch in ["=X", "=F", "-USD", "^", "."]) or sym in NON_EQUITY_ETFS:
-      return sym, None
+
+def _fetch_nasdaq_calendar_single_day(date_str):
+  """Fetches all NYSE/Nasdaq earnings scheduled for YYYY-MM-DD from Nasdaq's public calendar API."""
+  url = f"https://api.nasdaq.com/api/calendar/earnings?date={urllib.parse.quote(date_str)}"
+  hdrs = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+    "Accept": "application/json, text/plain, */*",
+    "Origin": "https://www.nasdaq.com",
+    "Referer": "https://www.nasdaq.com/"
+  }
+  out_rows = []
+  try:
+    req = urllib.request.Request(url, headers=hdrs)
+    with urllib.request.urlopen(req, timeout=5.5) as resp:
+      payload = json.loads(resp.read().decode("utf-8"))
+    rows = ((payload.get("data") or {}).get("rows")) or []
+    for rw in rows:
+      sym = str(rw.get("symbol", "") or "").strip().upper()
+      if sym:
+        out_rows.append((sym, date_str, _parse_nasdaq_earnings_time(rw.get("time", ""))))
+  except Exception:
+    pass
+  return out_rows
+
+
+def _fetch_nasdaq_market_earnings_window(days_ahead=30, force_refresh=False):
+  """Fetches the entire US earnings calendar for the next `days_ahead` days from Nasdaq. Never caches empty results."""
+  now_et_date = datetime.now(ZoneInfo("America/New_York")).date()
+  cache_key = f"nasdaq_{now_et_date.isoformat()}_{int(days_ahead)}"
+  store = st.session_state.get("earnings_cache_store", {})
+  if not isinstance(store, dict):
+    store = {}
+  cached = store.get(cache_key)
+  if (not force_refresh) and cached and isinstance(cached, dict):
+    age_sec = time.time() - float(cached.get("ts", 0))
+    if age_sec < 14400 and cached.get("data"):
+      return cached["data"], cached.get("meta", {})
+
+  target_dates = []
+  for d_off in range(0, int(days_ahead) + 1):
+    d_obj = now_et_date + pd.Timedelta(days=d_off)
+    if d_obj.weekday() < 5:
+      target_dates.append(d_obj.strftime("%Y-%m-%d"))
+
+  all_batches = _safe_parallel_map(_fetch_nasdaq_calendar_single_day, target_dates, max_workers=6)
+  nasdaq_map = {}
+  days_ok = 0
+  for batch in all_batches:
+    if batch:
+      days_ok += 1
+    for sym, dt_s, sess in batch:
+      if sym not in nasdaq_map or dt_s < nasdaq_map[sym][0]:
+        nasdaq_map[sym] = (dt_s, sess)
+
+  meta = {
+    "source": "Nasdaq Earnings Calendar",
+    "days_ahead": int(days_ahead),
+    "days_ok": days_ok,
+    "total_market_events": len(nasdaq_map),
+    "updated_hkt": datetime.now(ZoneInfo("Asia/Hong_Kong")).strftime("%H:%M:%S HKT")
+  }
+  if nasdaq_map:
+    store[cache_key] = {"ts": time.time(), "data": nasdaq_map, "meta": meta}
+    st.session_state["earnings_cache_store"] = store
+  return nasdaq_map, meta
+
+
+def _fetch_single_yahoo_earnings(sym, now_et_date, days_ahead=30):
+  """Fallback earnings date lookup via yfinance calendar & get_earnings_dates."""
+  try:
+    t_obj = yf.Ticker(sym)
+    cand_dates = []
     try:
-      t_obj = yf.Ticker(sym)
-      raw_date = None
-      try:
-        cal = t_obj.calendar
-        if isinstance(cal, dict) and "Earnings Date" in cal:
-          dates = cal["Earnings Date"]
-          raw_date = dates[0] if isinstance(dates, list) and dates else dates
-        elif isinstance(cal, pd.DataFrame) and "Earnings Date" in cal.index:
-          raw_date = cal.loc["Earnings Date"].iloc[0]
-      except Exception:
-        pass
-      if raw_date is not None:
-        dt_parsed = pd.to_datetime(raw_date).to_pydatetime().replace(tzinfo=None, hour=0, minute=0, second=0)
-        days_diff = (dt_parsed - now_dt).days
-        if 0 <= days_diff <= 60:
-          return sym, (days_diff, dt_parsed.strftime("%Y-%m-%d"))
+      cal = t_obj.calendar
+      if isinstance(cal, dict) and "Earnings Date" in cal:
+        raw_d = cal["Earnings Date"]
+        if isinstance(raw_d, list):
+          cand_dates.extend(raw_d)
+        elif raw_d is not None:
+          cand_dates.append(raw_d)
+      elif isinstance(cal, pd.DataFrame) and "Earnings Date" in cal.index:
+        cand_dates.append(cal.loc["Earnings Date"].iloc[0])
     except Exception:
       pass
-    return sym, None
+    if not cand_dates:
+      try:
+        ed_df = t_obj.get_earnings_dates(limit=4)
+        if ed_df is not None and not ed_df.empty:
+          cand_dates.extend(list(ed_df.index))
+      except Exception:
+        pass
+    valid_hits = []
+    for raw_date in cand_dates:
+      if raw_date is None:
+        continue
+      try:
+        ts_p = pd.to_datetime(raw_date)
+        dt_d = ts_p.tz_convert("America/New_York").date() if ts_p.tzinfo is not None else ts_p.date()
+        days_diff = (dt_d - now_et_date).days
+        if 0 <= days_diff <= int(days_ahead):
+          valid_hits.append((days_diff, dt_d.strftime("%Y-%m-%d"), "TBD"))
+      except Exception:
+        continue
+    if valid_hits:
+      valid_hits.sort(key=lambda x: x[0])
+      return sym, valid_hits[0]
+  except Exception:
+    pass
+  return sym, None
 
-  for sym, res in _safe_parallel_map(_check_one, list(dict.fromkeys(tickers))[:35], max_workers=6):
-    if res is not None:
-      out[sym] = res
+
+def fetch_upcoming_earnings_map(tickers, days_ahead=30, force_refresh=False):
+  """Returns {sym: (days_left, YYYY-MM-DD, BMO/AMC/TBD)} for ALL tracked tickers (next 30 days) via Nasdaq primary + Yahoo fallback."""
+  if not tickers:
+    return {}
+  clean_syms = list(dict.fromkeys([
+    str(s).strip().upper() for s in tickers
+    if str(s).strip() and not any(ch in str(s) for ch in ["=X", "=F", "-USD", "^", "."]) and str(s).strip().upper() not in NON_EQUITY_ETFS
+  ]))
+  if not clean_syms:
+    return {}
+
+  now_et_date = datetime.now(ZoneInfo("America/New_York")).date()
+  nasdaq_map, meta = _fetch_nasdaq_market_earnings_window(days_ahead=days_ahead, force_refresh=force_refresh)
+  out = {}
+  missing_syms = []
+  for sym in clean_syms:
+    if sym in nasdaq_map:
+      dt_s, sess = nasdaq_map[sym]
+      try:
+        dt_d = datetime.strptime(dt_s, "%Y-%m-%d").date()
+        days_diff = (dt_d - now_et_date).days
+        if 0 <= days_diff <= int(days_ahead):
+          out[sym] = (days_diff, dt_s, sess)
+          continue
+      except Exception:
+        pass
+    missing_syms.append(sym)
+
+  # Only hit Yahoo fallback if Nasdaq returned 0 market events OR if querying a single dossier ticker not found in Nasdaq
+  if (not nasdaq_map and missing_syms) or (len(clean_syms) == 1 and missing_syms):
+    yf_targets = missing_syms[:60]
+    for sym, res in _safe_parallel_map(lambda s: _fetch_single_yahoo_earnings(s, now_et_date, days_ahead=days_ahead), yf_targets, max_workers=4):
+      if res is not None:
+        out[sym] = res
   return out
 
 
@@ -1311,6 +1436,29 @@ def fetch_batch_market_data(tickers, account_size=100000, refresh_bucket=0):
     w_mom_pct=int(settings.get("w_mom", 20)),
     refresh_bucket=refresh_bucket
   )
+  # Overlay lightweight Yahoo v8/finance/chart live quotes onto watchlists (<=60 tickers)
+  # Fixes post-split (e.g. SNDK) & post-holiday day-change discrepancies without touching tk.info
+  if results and len(clean_tickers) <= 60:
+    try:
+      v8_live_map = fetch_v8_quotes_batch(tuple(clean_tickers), refresh_bucket=refresh_bucket)
+      if v8_live_map:
+        patched = {}
+        for k_sym, rec_v in results.items():
+          q_v8 = v8_live_map.get(k_sym)
+          if q_v8 is not None and q_v8.get("Price", 0) > 0:
+            rec_c = dict(rec_v)
+            rec_c["Price"] = q_v8["Price"]
+            rec_c["Prev_Close"] = q_v8["Prev_Close"]
+            rec_c["Change"] = q_v8["Change"]
+            rec_c["Change_Pct"] = q_v8["Change_Pct"]
+            rec_c["Day_High"] = q_v8["Day_High"]
+            rec_c["Day_Low"] = q_v8["Day_Low"]
+            patched[k_sym] = rec_c
+          else:
+            patched[k_sym] = rec_v
+        results = patched
+    except Exception:
+      pass
   if results:
     if "last_good_data" in st.session_state:
       st.session_state.last_good_data.update(results)
@@ -1398,7 +1546,7 @@ def fetch_ticker_fundamentals(ticker_symbol):
     "Company Name": ticker_symbol, "Market Cap": "N/A", "Trailing P/E": "N/A",
     "Forward P/E": "N/A", "EPS (TTM)": "N/A", "Target Price": "N/A",
     "52W High": "N/A", "52W Low": "N/A", "All-Time High": "N/A", "All-Time Low": "N/A",
-    "Earnings Date": "No upcoming (60d)", "Debt/Equity": "N/A",
+    "Earnings Date": "No upcoming (30d)", "Debt/Equity": "N/A",
     "ROE": "N/A", "Operating Margin": "N/A",
     "Business Summary": "No corporate overview provided."
   }
@@ -1430,10 +1578,11 @@ def fetch_ticker_fundamentals(ticker_symbol):
         data["All-Time Low"] = float(h_max["Low"].min())
     except Exception:
       pass
-    e_map = fetch_upcoming_earnings_map([ticker_symbol])
+    e_map = fetch_upcoming_earnings_map([ticker_symbol], days_ahead=30)
     if ticker_symbol in e_map:
-      d_left, d_str = e_map[ticker_symbol]
-      data["Earnings Date"] = f"{d_str} (in {d_left}d)"
+      d_left, d_str, d_sess = e_map[ticker_symbol]
+      s_tag = f" {d_sess}" if d_sess and d_sess != "TBD" else ""
+      data["Earnings Date"] = f"{d_str}{s_tag} (in {d_left}d)"
   except Exception:
     pass
   return data
@@ -1555,15 +1704,16 @@ def _extract_contract_metrics(row, S, K, T_years, opt_type="CALL", rv30=0.38):
   fallback_iv = float(rv30) if (rv30 and 0.08 <= float(rv30) <= 2.50) else 0.38
   iv = raw_iv if (0.06 <= raw_iv <= 3.5) else fallback_iv
   gk = _bs_greeks(S, K, T_years, r=0.045, sigma=iv, opt_type=opt_type)
-  if bid > 0 and ask > 0:
+  has_two_sided = (bid > 0 and ask > 0 and ask >= bid)
+  if has_two_sided:
     mid = 0.5 * (bid + ask)
     spread_pct = ((ask - bid) / max(mid, 0.01)) * 100.0
   elif last_p > 0:
     mid = last_p
-    spread_pct = 99.0 if (bid <= 0 or ask <= 0) else ((ask - bid) / max(mid, 0.01)) * 100.0
+    spread_pct = None
   else:
     mid = gk["price"]
-    spread_pct = 99.0
+    spread_pct = None
   intrinsic = gk["intrinsic"]
   mid = max(mid, intrinsic, 0.05)
   extrinsic = max(mid - intrinsic, 0.0)
@@ -1578,7 +1728,8 @@ def _extract_contract_metrics(row, S, K, T_years, opt_type="CALL", rv30=0.38):
     "Ask": round(ask, 2),
     "Last": round(last_p, 2),
     "Mid": round(mid, 2),
-    "Spread_Pct": round(spread_pct, 1),
+    "Spread_Pct": round(spread_pct, 1) if spread_pct is not None else None,
+    "Has_Quote": has_two_sided,
     "IV_Pct": round(iv * 100.0, 1),
     "IV_Raw": iv,
     "RV30_Pct": round(fallback_iv * 100.0, 1),
@@ -2087,72 +2238,171 @@ def log_options_ledger_entry(action_type, ticker, opt_type, exp_str, strike, con
   sync_file_to_github(options_ledger, OPTIONS_LEDGER_FILE)
 
 
-@st.cache_data(ttl=300, show_spinner=False)
+def _fetch_yf_v7_options_json(sym, exp_epoch=None):
+  """Direct lightweight fallback to Yahoo Finance v7/finance/options endpoint."""
+  hdrs = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+    "Accept": "application/json"
+  }
+  enc_sym = urllib.parse.quote(str(sym).strip().upper())
+  qs = f"?date={int(exp_epoch)}" if exp_epoch else ""
+  for host in ("query1.finance.yahoo.com", "query2.finance.yahoo.com"):
+    url = f"https://{host}/v7/finance/options/{enc_sym}{qs}"
+    try:
+      req = urllib.request.Request(url, headers=hdrs)
+      with urllib.request.urlopen(req, timeout=5.5) as resp:
+        payload = json.loads(resp.read().decode("utf-8"))
+      res = ((payload.get("optionChain") or {}).get("result")) or []
+      if res:
+        return res[0]
+    except Exception:
+      continue
+  return None
+
+
+def _fetch_option_expirations_resilient(sym):
+  """Returns sorted list of YYYY-MM-DD option expiration dates via yfinance with v7 JSON fallback. Never caches empty."""
+  cache = st.session_state.get("opt_chain_cache", {})
+  if not isinstance(cache, dict):
+    cache = {}
+  c_key = f"exp_{sym}"
+  hit = cache.get(c_key)
+  if hit and (time.time() - float(hit.get("ts", 0)) < 600) and hit.get("data"):
+    return hit["data"]
+
+  exps = []
+  try:
+    exps = list(yf.Ticker(sym).options or [])
+  except Exception:
+    exps = []
+  if not exps:
+    v7 = _fetch_yf_v7_options_json(sym)
+    if v7:
+      for ep in (v7.get("expirationDates") or []):
+        try:
+          exps.append(datetime.fromtimestamp(int(ep), tz=timezone.utc).strftime("%Y-%m-%d"))
+        except Exception:
+          continue
+  exps = sorted(list(dict.fromkeys([str(e)[:10] for e in exps if e])))
+  if exps:
+    cache[c_key] = {"ts": time.time(), "data": exps}
+    st.session_state["opt_chain_cache"] = cache
+  return exps
+
+
+def _fetch_option_chain_resilient(sym, exp_str):
+  """Returns (calls_df, puts_df) for (sym, exp_str) via yfinance with v7 JSON fallback. Never caches empty chains."""
+  cache = st.session_state.get("opt_chain_cache", {})
+  if not isinstance(cache, dict):
+    cache = {}
+  c_key = f"ch_{sym}_{exp_str}"
+  hit = cache.get(c_key)
+  if hit and (time.time() - float(hit.get("ts", 0)) < 300):
+    c_df, p_df = hit.get("calls"), hit.get("puts")
+    if (c_df is not None and not c_df.empty) or (p_df is not None and not p_df.empty):
+      return c_df, p_df
+
+  calls_df, puts_df = pd.DataFrame(), pd.DataFrame()
+  try:
+    ch = yf.Ticker(sym).option_chain(exp_str)
+    if ch is not None:
+      if ch.calls is not None and not ch.calls.empty:
+        calls_df = ch.calls
+      if ch.puts is not None and not ch.puts.empty:
+        puts_df = ch.puts
+  except Exception:
+    pass
+
+  if calls_df.empty and puts_df.empty:
+    try:
+      ep_dt = datetime.strptime(exp_str, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+      v7 = _fetch_yf_v7_options_json(sym, exp_epoch=int(ep_dt.timestamp()))
+      if v7 and (v7.get("options") or []):
+        opt0 = v7["options"][0]
+        if opt0.get("calls"):
+          calls_df = pd.DataFrame(opt0["calls"])
+        if opt0.get("puts"):
+          puts_df = pd.DataFrame(opt0["puts"])
+    except Exception:
+      pass
+
+  if (not calls_df.empty) or (not puts_df.empty):
+    cache[c_key] = {"ts": time.time(), "calls": calls_df, "puts": puts_df}
+    st.session_state["opt_chain_cache"] = cache
+  return calls_df, puts_df
+
+
+def _select_target_expirations(exp_list, now_dt):
+  exp_with_dte = []
+  for e_str in exp_list:
+    try:
+      dte = (datetime.strptime(e_str, "%Y-%m-%d") - now_dt).days
+      if dte >= 3:
+        exp_with_dte.append((dte, e_str))
+    except Exception:
+      continue
+  if not exp_with_dte:
+    return []
+  chosen_exps = []
+  leaps_pool = [x for x in exp_with_dte if 240 <= x[0] <= 600]
+  if not leaps_pool:
+    leaps_pool = [x for x in exp_with_dte if x[0] >= 160]
+  if leaps_pool:
+    chosen_exps.append(sorted(leaps_pool, key=lambda x: abs(x[0] - 365))[0])
+
+  short_pool = [x for x in exp_with_dte if 14 <= x[0] <= 45]
+  if not short_pool:
+    short_pool = [x for x in exp_with_dte if 5 <= x[0] <= 60]
+  if short_pool:
+    s1 = sorted(short_pool, key=lambda x: abs(x[0] - 25))[0]
+    chosen_exps.append(s1)
+    s2_pool = [x for x in short_pool if x[1] != s1[1]]
+    if s2_pool:
+      chosen_exps.append(sorted(s2_pool, key=lambda x: abs(x[0] - 42))[0])
+
+  med_pool = [x for x in exp_with_dte if 50 <= x[0] <= 130]
+  if med_pool:
+    chosen_exps.append(sorted(med_pool, key=lambda x: abs(x[0] - 75))[0])
+
+  if not chosen_exps:
+    chosen_exps = exp_with_dte[:3]
+
+  seen_e, uniq_exps = set(), []
+  for dte, e_s in chosen_exps:
+    if e_s not in seen_e:
+      seen_e.add(e_s)
+      uniq_exps.append((dte, e_s))
+  return uniq_exps
+
+
 def _scan_single_ticker_option_presets(
   sym, stock_price, target_price, stop_price, sma150, ema50, atr14, rv30,
   playbook_cat, tct_action, below_sma150, is_stage2_hl, is_squeeze,
-  earnings_days=None, scenario_days=14, custom_target=None
+  earnings_days=None, scenario_days=14, custom_target=None, unrestricted_scenario=False
 ):
-  """Scans a single ticker's liquid option chains across all 5 Option Samurai presets (no put-selling/wheel)."""
+  """Scans a single ticker's option chains across all 5 presets (off-hours safe). Returns (preset_hits, all_liquid, chain_ok)."""
   candidates = []
+  all_liquid = []
+  chain_ok = False
   try:
-    tk = yf.Ticker(sym)
-    exp_list = list(tk.options or [])
+    exp_list = _fetch_option_expirations_resilient(sym)
     if not exp_list:
-      return candidates
-    now_dt = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
-    exp_with_dte = []
-    for e_str in exp_list:
-      try:
-        dte = (datetime.strptime(e_str, "%Y-%m-%d") - now_dt).days
-        if dte >= 4:
-          exp_with_dte.append((dte, e_str))
-      except Exception:
-        continue
-    if not exp_with_dte:
-      return candidates
-
-    # Pick targeted expirations: 1 LEAPS (270-540 DTE), 2 short/medium (14-45 DTE & ~60-90 DTE)
-    chosen_exps = []
-    leaps_pool = [x for x in exp_with_dte if 270 <= x[0] <= 540]
-    if not leaps_pool:
-      leaps_pool = [x for x in exp_with_dte if x[0] >= 180]
-    if leaps_pool:
-      chosen_exps.append(sorted(leaps_pool, key=lambda x: abs(x[0] - 365))[0])
-
-    short_pool = [x for x in exp_with_dte if 14 <= x[0] <= 45]
-    if not short_pool:
-      short_pool = [x for x in exp_with_dte if 7 <= x[0] <= 60]
-    if short_pool:
-      s1 = sorted(short_pool, key=lambda x: abs(x[0] - 25))[0]
-      chosen_exps.append(s1)
-      s2_pool = [x for x in short_pool if x[1] != s1[1]]
-      if s2_pool:
-        chosen_exps.append(sorted(s2_pool, key=lambda x: abs(x[0] - 42))[0])
-
-    med_pool = [x for x in exp_with_dte if 50 <= x[0] <= 120]
-    if med_pool:
-      chosen_exps.append(sorted(med_pool, key=lambda x: abs(x[0] - 75))[0])
-
-    seen_e = set()
-    uniq_exps = []
-    for dte, e_s in chosen_exps:
-      if e_s not in seen_e:
-        seen_e.add(e_s)
-        uniq_exps.append((dte, e_s))
+      return candidates, all_liquid, False
+    now_dt = datetime.now(ZoneInfo("America/New_York")).replace(tzinfo=None, hour=0, minute=0, second=0, microsecond=0)
+    uniq_exps = _select_target_expirations(exp_list, now_dt)
+    if not uniq_exps:
+      return candidates, all_liquid, False
 
     eff_target = float(custom_target) if (custom_target and float(custom_target) > 0) else float(target_price)
-    bear_target = min(float(stop_price) * 0.94, stock_price * 0.90)
+    bear_target = float(custom_target) if (unrestricted_scenario and custom_target and float(custom_target) > 0) else min(float(stop_price) * 0.94, stock_price * 0.90)
     bear_stop = max(float(ema50) * 1.02, stock_price * 1.04)
 
     for dte, e_str in uniq_exps:
-      try:
-        ch = tk.option_chain(e_str)
-      except Exception:
+      calls_df, puts_df = _fetch_option_chain_resilient(sym, e_str)
+      if calls_df.empty and puts_df.empty:
         continue
+      chain_ok = True
       T_yr = max(dte / 365.0, 2.0 / 365.0)
-      calls_df = ch.calls if (ch and ch.calls is not None) else pd.DataFrame()
-      puts_df = ch.puts if (ch and ch.puts is not None) else pd.DataFrame()
 
       # Preset 5: Earnings Expected-Move Guard (ATM Straddle Implied Move)
       earn_in_dte = (earnings_days is not None and 0 <= int(earnings_days) <= dte)
@@ -2168,13 +2418,12 @@ def _scan_single_ticker_option_presets(
           pass
       earn_guard_str = f"EARN {int(earnings_days)}d (+/-{implied_move_pct:.1f}%)" if (earn_in_dte and implied_move_pct) else (f"EARN {int(earnings_days)}d" if earn_in_dte else "Clear")
 
-      # Helper to build candidate row
       def _eval_side(df_side, opt_type):
         if df_side is None or df_side.empty:
           return
         is_call = (opt_type == "CALL")
-        k_min = stock_price * (0.40 if dte >= 180 and is_call else 0.84)
-        k_max = stock_price * (1.16 if is_call else 1.14)
+        k_min = stock_price * (0.35 if dte >= 160 and is_call else 0.80)
+        k_max = stock_price * (1.20 if is_call else 1.18)
         sub_df = df_side[(df_side["strike"] >= k_min) & (df_side["strike"] <= k_max)]
         for _, rw in sub_df.iterrows():
           K = float(rw.get("strike", 0.0) or 0.0)
@@ -2182,14 +2431,24 @@ def _scan_single_ticker_option_presets(
             continue
           m = _extract_contract_metrics(rw, stock_price, K, T_yr, opt_type, rv30=rv30)
           abs_d = abs(m["Delta"])
-          if abs_d < 0.25 or abs_d > 0.94:
+          if abs_d < 0.22 or abs_d > 0.95:
             continue
           mid = m["Mid"]
+          spr_val = m["Spread_Pct"]
+          has_activity = (m["OpenInterest"] >= 5) or (m["Volume"] >= 5) or (m["Last"] > 0) or m["Has_Quote"]
+          if not has_activity:
+            continue
+
+          def _spr_ok(max_s):
+            if spr_val is not None:
+              return spr_val <= max_s
+            # Off-hours / missing bid-ask fallback: accept if contract has verified trading/OI activity
+            return (m["OpenInterest"] >= 10) or (m["Volume"] >= 5) or (m["Last"] > 0)
+
           be = round(K + mid, 2) if is_call else round(K - mid, 2)
           be_dist = abs(be - stock_price)
           ann_fin_cost = round(((m["Extrinsic"] / max(K, 0.01)) * (365.0 / max(dte, 1))) * 100.0, 2) if is_call else 0.0
 
-          # Scenario P/L Projection (Preset 4)
           hold_d = min(max(int(scenario_days), 2), max(dte - 1, 1))
           T_scen = max((dte - hold_d) / 365.0, 1.0 / 365.0)
           scen_tgt_s = eff_target if is_call else bear_target
@@ -2205,62 +2464,58 @@ def _scan_single_ticker_option_presets(
           share_ret_pct = abs((scen_tgt_s - stock_price) / max(stock_price, 0.01)) * 100.0
           lev_vs_shares = round(proj_ret_pct / max(share_ret_pct, 0.5), 2)
 
-          # Classify into the 5 Option Samurai Presets
           presets_hit = []
-
           # 1. LEAPS Stock Replacement
           if (
-            is_call and (270 <= dte <= 540) and (0.83 <= m["Delta"] <= 0.91)
-            and (m["Extrinsic_Pct"] <= 6.5) and (m["Spread_Pct"] <= 5.5)
-            and (m["OpenInterest"] >= 100) and (not below_sma150)
+            is_call and (240 <= dte <= 600) and (0.80 <= m["Delta"] <= 0.93)
+            and (m["Extrinsic_Pct"] <= 9.0) and _spr_ok(8.5)
+            and ((m["OpenInterest"] >= 25) or (m["Volume"] >= 10) or (m["Last"] > 0))
+            and (not below_sma150)
           ):
             presets_hit.append("LEAPS Stock Replacement")
 
-          # 2. Cheap Volatility Directional (IV < RV)
-          bull_dir = (not below_sma150) and (is_stage2_hl or is_squeeze or playbook_cat in ("STAGE2_HL", "SWING_PULLBACK", "BREAKOUT", "TCT"))
+          # 2. Cheap Volatility Directional (IV <= 1.05x RV)
+          bull_dir = (not below_sma150)
           bear_dir = below_sma150 or (stock_price < ema50)
           if (
-            (14 <= dte <= 45) and (0.45 <= abs_d <= 0.65)
-            and (m["IV_RV"] < 1.0) and (m["Spread_Pct"] <= 10.0)
+            (14 <= dte <= 60) and (0.40 <= abs_d <= 0.70)
+            and (m["IV_RV"] <= 1.05) and _spr_ok(12.0)
             and ((is_call and bull_dir) or ((not is_call) and bear_dir))
           ):
             presets_hit.append("Cheap Vol Directional (IV<RV)")
 
           # 3. Unusual Options Volume / Smart Money
           if (
-            (m["Volume"] > 500) and (m["Vol_OI"] > 1.5)
-            and (be_dist <= max(1.5 * atr14, stock_price * 0.03))
+            (m["Volume"] >= 250) and (m["Vol_OI"] >= 1.2)
+            and (be_dist <= max(2.0 * atr14, stock_price * 0.05))
           ):
             presets_hit.append("Unusual Volume / Smart Money")
 
           # 4. Stock Scenario Optimizer (liquid directional contracts)
           if (
-            (m["Spread_Pct"] <= 12.0) and (m["OpenInterest"] >= 20 or m["Volume"] >= 20)
-            and (proj_ret_pct >= 15.0) and (opt_rr >= 1.5)
-            and ((is_call and not below_sma150) or ((not is_call) and bear_dir))
+            _spr_ok(15.0) and ((m["OpenInterest"] >= 10) or (m["Volume"] >= 5) or (m["Last"] > 0))
+            and (proj_ret_pct >= 10.0) and (opt_rr >= 1.25)
+            and ((is_call and bull_dir) or ((not is_call) and bear_dir))
           ):
             presets_hit.append("Scenario Optimizer")
 
-          # 5. Earnings Expected-Move Guard (flags liquid short-term contracts straddling earnings)
-          if earn_in_dte and (0.40 <= abs_d <= 0.65) and (m["Spread_Pct"] <= 12.0):
+          # 5. Earnings Expected-Move Guard
+          if earn_in_dte and (0.35 <= abs_d <= 0.70) and _spr_ok(15.0):
             presets_hit.append("Earnings Guard")
 
-          if not presets_hit:
-            continue
-
-          # Composite rank score per preset
+          spr_pen = min(spr_val, 20.0) if spr_val is not None else 4.0
           rank_score = (
             (30.0 if "LEAPS Stock Replacement" in presets_hit else 0.0)
             + (26.0 if "Cheap Vol Directional (IV<RV)" in presets_hit else 0.0)
             + (24.0 if "Unusual Volume / Smart Money" in presets_hit else 0.0)
             + min(opt_rr, 6.0) * 6.0
             + min(max(proj_ret_pct, 0.0), 150.0) * 0.15
-            - min(m["Spread_Pct"], 20.0) * 1.2
+            - spr_pen * 1.0
             - (12.0 if (earn_in_dte and dte <= 45 and "LEAPS Stock Replacement" not in presets_hit) else 0.0)
           )
-          candidates.append({
+          row_obj = {
             "Ticker": sym,
-            "Preset": " | ".join([p for p in presets_hit if p != "Earnings Guard"][:2]) or "Earnings Guard",
+            "Preset": (" | ".join([p for p in presets_hit if p != "Earnings Guard"][:2]) or ("Earnings Guard" if "Earnings Guard" in presets_hit else "Liquid Contract")),
             "Presets_List": presets_hit,
             "Type": opt_type,
             "Exp": e_str,
@@ -2270,7 +2525,7 @@ def _scan_single_ticker_option_presets(
             "Mid": m["Mid"],
             "Bid": m["Bid"],
             "Ask": m["Ask"],
-            "Spread_%": m["Spread_Pct"],
+            "Spread_%": spr_val if spr_val is not None else np.nan,
             "Cost_1x": round(m["Mid"] * 100.0, 0),
             "Delta": m["Delta"],
             "Gamma": m["Gamma"],
@@ -2298,16 +2553,19 @@ def _scan_single_ticker_option_presets(
             "Hold_Days": hold_d,
             "Playbook": tct_action,
             "Rank_Score": round(rank_score, 2)
-          })
+          }
+          all_liquid.append(row_obj)
+          if presets_hit or unrestricted_scenario:
+            candidates.append(row_obj)
 
       _eval_side(calls_df, "CALL")
       _eval_side(puts_df, "PUT")
   except Exception:
     pass
-  return candidates
+  return candidates, all_liquid, chain_ok
 
 
-def run_parallel_options_scanner(symbols, stock_data_map, earnings_map, scenario_days=14, custom_target_map=None):
+def run_parallel_options_scanner(symbols, stock_data_map, earnings_map, scenario_days=14, custom_target_map=None, unrestricted_scenario=False, return_meta=False):
   custom_target_map = custom_target_map or {}
   valid_syms = [s for s in symbols if s in stock_data_map and not any(c in s for c in ["=X", "=F", "-USD", "^"])]
 
@@ -2330,13 +2588,29 @@ def run_parallel_options_scanner(symbols, stock_data_map, earnings_map, scenario
       bool(d.get("Is_BB_Squeeze", False)),
       earnings_days=e_days,
       scenario_days=scenario_days,
-      custom_target=custom_target_map.get(sym)
+      custom_target=custom_target_map.get(sym),
+      unrestricted_scenario=unrestricted_scenario
     )
 
   all_rows = []
-  for batch in _safe_parallel_map(_worker, valid_syms, max_workers=6):
-    if batch:
-      all_rows.extend(batch)
+  all_liquid = []
+  ok_count = 0
+  # Use max_workers=3 so Yahoo options endpoints do not rate-limit Streamlit Cloud
+  for cands, liq, ok_flag in _safe_parallel_map(_worker, valid_syms, max_workers=3):
+    if ok_flag:
+      ok_count += 1
+    if cands:
+      all_rows.extend(cands)
+    if liq:
+      all_liquid.extend(liq)
+  if return_meta:
+    meta = {
+      "tickers_total": len(valid_syms),
+      "tickers_loaded": ok_count,
+      "liquid_evaluated": len(all_liquid),
+      "preset_hits": len(all_rows)
+    }
+    return all_rows, all_liquid, meta
   return all_rows
 
 
@@ -2488,32 +2762,68 @@ def render_options_cockpit_tab():
       else (active_wl_syms if scan_universe_choice == "Active Portfolio" else get_all_monitored_tickers()[:30])
     )
 
-    if run_parallel_btn or st.session_state.opt_scan_results is None:
-      with st.spinner(f"Parallel scanning {len(target_scan_syms)} tickers across 5 quantitative presets..."):
-        scanned_rows = run_parallel_options_scanner(target_scan_syms, stock_data_map, earnings_map, scenario_days=14)
+    need_opt_rescan = (
+      run_parallel_btn
+      or (st.session_state.opt_scan_results is None)
+      or (st.session_state.get("opt_scan_source_last", "") != scan_universe_choice)
+      or (not st.session_state.get("opt_scan_all_liquid"))
+    )
+    if need_opt_rescan:
+      if run_parallel_btn:
+        st.session_state["opt_chain_cache"] = {}
+      with st.spinner(f"Scanning {len(target_scan_syms)} tickers across 5 quantitative presets..."):
+        scanned_rows, scanned_liquid, scan_meta = run_parallel_options_scanner(
+          target_scan_syms, stock_data_map, earnings_map, scenario_days=14, return_meta=True
+        )
         st.session_state.opt_scan_results = scanned_rows
-        st.session_state.opt_scan_label = f"{scan_universe_choice} ({len(target_scan_syms)} tickers)"
+        st.session_state.opt_scan_all_liquid = scanned_liquid
+        st.session_state.opt_scan_meta = scan_meta
+        st.session_state.opt_scan_source_last = scan_universe_choice
+        st.session_state.opt_scan_label = f"{scan_universe_choice} ({scan_meta['tickers_loaded']}/{scan_meta['tickers_total']} chains · {scan_meta['liquid_evaluated']} liquid contracts)"
 
     raw_rows = st.session_state.opt_scan_results or []
+    all_liq_rows = st.session_state.get("opt_scan_all_liquid") or []
+    used_closest_fallback = False
     filtered_rows = list(raw_rows)
     if preset_filter.startswith("1."):
       filtered_rows = [r for r in raw_rows if "LEAPS Stock Replacement" in r["Presets_List"]]
       filtered_rows.sort(key=lambda x: x["AnnFin_%"])
+      if not filtered_rows and all_liq_rows:
+        used_closest_fallback = True
+        leaps_c = [r for r in all_liq_rows if r["Type"] == "CALL" and r["DTE"] >= 160 and r["Delta"] >= 0.70]
+        filtered_rows = sorted(leaps_c, key=lambda x: (abs(x["Delta"] - 0.87), x["AnnFin_%"]))[:12]
     elif preset_filter.startswith("2."):
       filtered_rows = [r for r in raw_rows if "Cheap Vol Directional (IV<RV)" in r["Presets_List"]]
       filtered_rows.sort(key=lambda x: (x["IV/RV"], -x["Opt_RR"]))
+      if not filtered_rows and all_liq_rows:
+        used_closest_fallback = True
+        cv_c = [r for r in all_liq_rows if 10 <= r["DTE"] <= 75 and 0.35 <= abs(r["Delta"]) <= 0.75]
+        filtered_rows = sorted(cv_c, key=lambda x: (x["IV/RV"], -x["Opt_RR"]))[:12]
     elif preset_filter.startswith("3."):
       filtered_rows = [r for r in raw_rows if "Unusual Volume / Smart Money" in r["Presets_List"]]
       filtered_rows.sort(key=lambda x: (-x["Vol/OI"], -x["Vol"]))
+      if not filtered_rows and all_liq_rows:
+        used_closest_fallback = True
+        filtered_rows = sorted(all_liq_rows, key=lambda x: (-x["Vol/OI"], -x["Vol"]))[:12]
     elif preset_filter.startswith("4."):
       filtered_rows = [r for r in raw_rows if "Scenario Optimizer" in r["Presets_List"]]
       filtered_rows.sort(key=lambda x: (-x["Opt_RR"], -x["Proj_%"]))
+      if not filtered_rows and all_liq_rows:
+        used_closest_fallback = True
+        filtered_rows = sorted(all_liq_rows, key=lambda x: (-x["Opt_RR"], -x["Proj_%"]))[:12]
     elif preset_filter.startswith("5."):
       filtered_rows = [r for r in raw_rows if "Earnings Guard" in r["Presets_List"]]
       filtered_rows.sort(key=lambda x: (x["DTE"], -x["IV_%"]))
+      if not filtered_rows and all_liq_rows:
+        eg_any = [r for r in all_liq_rows if str(r.get("Earn_Guard", "")).startswith("EARN")]
+        if eg_any:
+          used_closest_fallback = True
+          filtered_rows = sorted(eg_any, key=lambda x: (x["DTE"], -x["IV_%"]))[:12]
     else:
-      # Top 10 deduplicated by (Ticker, Type, DTE bucket)
-      sorted_all = sorted(raw_rows, key=lambda x: -x["Rank_Score"])
+      pool_src = raw_rows if raw_rows else all_liq_rows
+      if not raw_rows and all_liq_rows:
+        used_closest_fallback = True
+      sorted_all = sorted(pool_src, key=lambda x: -x["Rank_Score"])
       dedup, seen_k = [], set()
       for r in sorted_all:
         k = (r["Ticker"], r["Type"], "LEAPS" if r["DTE"] >= 180 else "SHORT")
@@ -2523,6 +2833,8 @@ def render_options_cockpit_tab():
       filtered_rows = dedup[:10] if run_parallel_btn else dedup[:25]
 
     st.caption(f"Source: {st.session_state.opt_scan_label} | Showing {len(filtered_rows)} ranked contracts (single-leg Calls & Puts only). Click any row to open its interactive P/L Scenario Curve & Log button.")
+    if used_closest_fallback and filtered_rows:
+      st.info("No exact strict preset matches on this session — showing the closest ranked liquid candidates for this preset.")
 
     if filtered_rows:
       disp_cols = [
@@ -2547,6 +2859,7 @@ def render_options_cockpit_tab():
       with sc_c1:
         render_option_scenario_pl_chart(chosen_row)
       with sc_c2:
+        spr_ticket_txt = f'{chosen_row["Spread_%"]:.1f}%' if pd.notna(chosen_row["Spread_%"]) else "Off-Hrs"
         st.markdown(
           f'<div class="stock-card">'
           f'<div style="font-size:0.70rem;font-weight:700;color:#c5a059;text-transform:uppercase;letter-spacing:0.06em;">SELECTED CONTRACT TICKET</div>'
@@ -2554,7 +2867,7 @@ def render_options_cockpit_tab():
           f'<a href="?inspect={chosen_row["Ticker"]}" target="_self" class="ticker-link">{chosen_row["Ticker"]}</a> '
           f'{chosen_row["Exp"]} ${chosen_row["Strike"]:g} {chosen_row["Type"]}</div>'
           f'<div class="trade-ticket">'
-          f'<b>Mid:</b> ${chosen_row["Mid"]:.2f} (Bid ${chosen_row["Bid"]:.2f} / Ask ${chosen_row["Ask"]:.2f} | Spr {chosen_row["Spread_%"]:.1f}%)<br>'
+          f'<b>Mid:</b> ${chosen_row["Mid"]:.2f} (Bid ${chosen_row["Bid"]:.2f} / Ask ${chosen_row["Ask"]:.2f} | Spr {spr_ticket_txt})<br>'
           f'<b>1x Cost:</b> ${chosen_row["Cost_1x"]:,.0f} | <b>BE:</b> ${chosen_row["BE"]:,.2f}<br>'
           f'<b>Greeks:</b> Delta {chosen_row["Delta"]:.3f} | Gamma {chosen_row["Gamma"]:.4f}<br>'
           f'<b>Theta:</b> ${chosen_row["Theta/d"]:.3f}/sh (${chosen_row["Theta/d"]*100:.1f}/d) | <b>Vega:</b> ${chosen_row["Vega"]:.2f}<br>'
@@ -2589,7 +2902,11 @@ def render_options_cockpit_tab():
           st.success(f"Logged {chosen_row['Ticker']} {chosen_row['Exp']} ${chosen_row['Strike']:g} {chosen_row['Type']}.")
           st.rerun()
     else:
-      st.info("No contracts matched that strict preset filter right now. Switch to All 5 Presets or use the Stock Scenario Optimizer tab to customize target price and days.")
+      s_meta = st.session_state.get("opt_scan_meta") or {}
+      if s_meta.get("tickers_loaded", 0) == 0:
+        st.warning("Option chains could not be fetched from Yahoo right now (temporary rate limit or off-hours feed gap). Tap Scan Top 10 Now to retry.")
+      else:
+        st.info("No contracts matched that filter (for Earnings Guard, this means none of the scanned tickers have earnings within these expirations). Switch preset or open Tab 2.")
 
   with opt_tab2:
     st.markdown("### Stock Scenario Optimizer (Rank Best Strike & Expiry for Your Price Target)")
@@ -2599,12 +2916,17 @@ def render_options_cockpit_tab():
     sd_scen = stock_data_map.get(scen_sym)
     def_tgt = round(float(sd_scen["Target_Price"]), 2) if sd_scen else 150.0
     def_px = round(float(sd_scen["Price"]), 2) if sd_scen else 120.0
-    scen_tgt_in = sc2.number_input(f"Target Price ($) [Now ${def_px:.2f}]", min_value=0.5, value=def_tgt, step=1.0, key="scen_tgt_px")
+    scen_tgt_in = sc2.number_input(f"Target Price ($) [Now ${def_px:.2f}]", min_value=0.5, value=def_tgt, step=1.0, key=f"scen_tgt_px_{scen_sym}")
     scen_days_in = sc3.number_input("Target Holding Days", min_value=2, max_value=365, value=14, step=2, key="scen_hold_d")
-    scen_dir = sc4.radio("Direction", ["CALL", "PUT"], index=(0 if scen_tgt_in >= def_px else 1), horizontal=True, key="scen_dir_rad")
+    scen_dir = sc4.radio("Direction", ["CALL", "PUT"], index=(0 if scen_tgt_in >= def_px else 1), horizontal=True, key=f"scen_dir_rad_{scen_sym}")
 
     if sd_scen:
-      scen_rows = run_parallel_options_scanner([scen_sym], stock_data_map, earnings_map, scenario_days=int(scen_days_in), custom_target_map={scen_sym: float(scen_tgt_in)})
+      scen_rows = run_parallel_options_scanner(
+        [scen_sym], stock_data_map, earnings_map,
+        scenario_days=int(scen_days_in),
+        custom_target_map={scen_sym: float(scen_tgt_in)},
+        unrestricted_scenario=True
+      )
       scen_rows = [r for r in scen_rows if r["Type"] == scen_dir]
       scen_rows.sort(key=lambda x: (-x["Proj_%"], -x["Opt_RR"]))
       if scen_rows:
@@ -2631,8 +2953,7 @@ def render_options_cockpit_tab():
       if deep_sym in stock_data_map:
         sd = stock_data_map[deep_sym]
         try:
-          tk_d = yf.Ticker(deep_sym)
-          all_exps = list(tk_d.options or [])
+          all_exps = _fetch_option_expirations_resilient(deep_sym)
           now_d = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
           valid_exps = []
           for e_s in all_exps:
@@ -2647,8 +2968,8 @@ def render_options_cockpit_tab():
             valid_exps = [((datetime.strptime(e_s, "%Y-%m-%d") - now_d).days, e_s) for e_s in all_exps[:4]]
           if valid_exps:
             chosen_dte, chosen_exp = st.selectbox("Expiration Date", valid_exps, format_func=lambda x: f"{x[1]} ({x[0]} DTE)", key="deep_exp_sel")
-            ch_d = tk_d.option_chain(chosen_exp)
-            df_s = ch_d.calls if deep_type == "CALL" else ch_d.puts
+            c_df_d, p_df_d = _fetch_option_chain_resilient(deep_sym, chosen_exp)
+            df_s = c_df_d if deep_type == "CALL" else p_df_d
             rows_deep = []
             T_y = max(chosen_dte / 365.0, 1.0 / 365.0)
             for _, rw in df_s.iterrows():
@@ -3057,9 +3378,9 @@ def _fetch_yf_v8_chart_quote(sym):
         continue
       meta = results[0].get("meta") or {}
       px = meta.get("regularMarketPrice")
-      prev_c = meta.get("previousClose")
+      prev_c = meta.get("chartPreviousClose")
       if prev_c is None or float(prev_c) <= 0:
-        prev_c = meta.get("chartPreviousClose")
+        prev_c = meta.get("previousClose")
       if px is not None and float(px) > 0:
         px_f = float(px)
         pc_f = float(prev_c) if (prev_c is not None and float(prev_c) > 0) else px_f
@@ -3101,7 +3422,7 @@ def fetch_v8_quotes_batch(tickers_tuple, refresh_bucket=0):
   syms = [str(s).strip().upper() for s in tickers_tuple if str(s).strip()]
   if not syms:
     return {}
-  res_list = _safe_parallel_map(lambda s: (s, _fetch_yf_v8_chart_quote(s)), syms, max_workers=5)
+  res_list = _safe_parallel_map(lambda s: (s, _fetch_yf_v8_chart_quote(s)), syms, max_workers=8)
   return {s: q for s, q in res_list if q is not None}
 
 
@@ -4086,7 +4407,7 @@ st.sidebar.markdown(
   'EDITORIAL TERMINAL ENGINE</span>'
   '<h2 style="color:#f4efe6 !important;margin:5px 0 0 0;font-size:1.35rem;">Ledger</h2>'
   '<span style="font-size:0.70rem;color:#c5a059;text-transform:uppercase;'
-  'letter-spacing:0.1em;font-weight:700;">Momentum | Stage 2 | Options v12.3</span></div>',
+  'letter-spacing:0.1em;font-weight:700;">Momentum | Stage 2 | Options v12.4</span></div>',
   unsafe_allow_html=True
 )
 navigation = st.sidebar.radio(
@@ -4200,7 +4521,7 @@ if st.session_state.inspect_symbol is not None:
     ath_val = max(float(df_hist["High"].max()), float(ath_raw) if isinstance(ath_raw, (int, float)) else 0.0)
     atl_val = min(float(df_hist["Low"].min()), float(atl_raw) if isinstance(atl_raw, (int, float)) and atl_raw > 0 else float(df_hist["Low"].min()))
     hist_hl_text = f"${ath_val:,.2f} / ${atl_val:,.2f}"
-    earn_text = funds.get("Earnings Date", "No upcoming (60d)")
+    earn_text = funds.get("Earnings Date", "No upcoming (30d)")
 
     with c_ctrl:
       st.markdown("---")
@@ -4583,12 +4904,20 @@ else:
           base_r = dict(live_records[s_ep]) if s_ep in live_records else None
           ext_r = ext_map.get(s_ep)
           if base_r is not None and ext_r is not None:
-            base_r["Price"] = ext_r["Price"]
-            base_r["Change"] = ext_r["Change"]
-            base_r["Change_Pct"] = ext_r["Change_Pct"]
-            base_r["Day_High"] = ext_r["Day_High"]
-            base_r["Day_Low"] = ext_r["Day_Low"]
-            base_r["Ext_Session"] = ext_r["Session"]
+            if ext_r["Session"] == "RTH":
+              base_r["Ext_Session"] = "RTH"
+            else:
+              # Anchor extended-hours change to official split-adjusted regular close from v8
+              ref_rth = float(base_r.get("Price", 0.0) or ext_r.get("Ref_Close", 0.0))
+              ext_px = float(ext_r["Price"])
+              ext_chg = (ext_px - ref_rth) if ref_rth > 0 else float(ext_r["Change"])
+              ext_pct = (ext_chg / ref_rth * 100.0) if ref_rth > 0 else float(ext_r["Change_Pct"])
+              base_r["Price"] = ext_px
+              base_r["Change"] = ext_chg
+              base_r["Change_Pct"] = ext_pct
+              base_r["Day_High"] = ext_r["Day_High"]
+              base_r["Day_Low"] = ext_r["Day_Low"]
+              base_r["Ext_Session"] = ext_r["Session"]
             merged_records[s_ep] = base_r
           elif base_r is not None:
             base_r["Ext_Session"] = "RTH"
@@ -4989,9 +5318,10 @@ new TradingView.widget({{
         )
         earn_html = ""
         if sym in earnings_map:
-          days_left, dt_s = earnings_map[sym]
+          days_left, dt_s, dt_sess = earnings_map[sym]
           if days_left <= 14:
-            earn_html = f'<span class="badge badge-earn-warn" style="margin-left:4px;">EARN {days_left}d ({dt_s})</span>'
+            s_lbl = f" {dt_sess}" if dt_sess and dt_sess != "TBD" else ""
+            earn_html = f'<span class="badge badge-earn-warn" style="margin-left:4px;">EARN {days_left}d ({dt_s}{s_lbl})</span>'
         chg_clr = "#15803d" if d["Change"] >= 0 else "#b91c1c"
         with (left_c if idx % 2 == 0 else right_c):
           st.markdown(
@@ -5098,16 +5428,35 @@ new TradingView.widget({{
         if mcf_articles:
           _render_news_box(mcf_articles, show_ticker=True)
     with n_col2:
-      st.subheader("Upcoming Earnings Calendar")
-      earnings_map = fetch_upcoming_earnings_map(tracked_symbols)
+      ec1, ec2 = st.columns([2.4, 1.0])
+      ec1.subheader("Upcoming Earnings (30d)")
+      force_earn_ref = ec2.button("Refresh", use_container_width=True, key="ref_earn_now_btn")
+      earnings_map = fetch_upcoming_earnings_map(tracked_symbols, days_ahead=30, force_refresh=force_earn_ref)
+      store_e = st.session_state.get("earnings_cache_store", {})
+      e_meta = {}
+      if isinstance(store_e, dict):
+        for _v in store_e.values():
+          if isinstance(_v, dict) and _v.get("meta"):
+            e_meta = _v["meta"]
       if earnings_map:
         rows = sorted(
-          [{"Ticker": s, "Earnings Date": dt_str, "Countdown": f"{days_left}d", "_sort": days_left} for s, (days_left, dt_str) in earnings_map.items()],
+          [{
+            "Ticker": s,
+            "Earnings Date": dt_str,
+            "Session": sess,
+            "Countdown": ("TODAY" if days_left == 0 else f"{days_left}d"),
+            "_sort": (days_left, s)
+          } for s, (days_left, dt_str, sess) in earnings_map.items()],
           key=lambda x: x["_sort"]
         )
-        st.dataframe(pd.DataFrame([{"Ticker": r["Ticker"], "Earnings Date": r["Earnings Date"], "Countdown": r["Countdown"]} for r in rows]), use_container_width=True, hide_index=True)
+        st.dataframe(
+          pd.DataFrame([{"Ticker": r["Ticker"], "Earnings Date": r["Earnings Date"], "Session": r["Session"], "In": r["Countdown"]} for r in rows]),
+          use_container_width=True, hide_index=True
+        )
       else:
-        st.info("No confirmed upcoming earnings within the next 60 days.")
+        st.info("No confirmed upcoming earnings within the next 30 days across your tracked watchlists.")
+      src_txt = f"{e_meta.get('source', 'Nasdaq + Yahoo')} · {e_meta.get('total_market_events', 0)} market events · Updated {e_meta.get('updated_hkt', 'now')}" if e_meta else "Source: Nasdaq Earnings Calendar + Yahoo Fallback (Next 30 Days)"
+      st.caption(src_txt)
 
   elif navigation == "Settings":
     st.markdown("<h1>Settings & Strategy Calibration</h1>", unsafe_allow_html=True)
